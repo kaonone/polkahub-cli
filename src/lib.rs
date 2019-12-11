@@ -1,10 +1,10 @@
-use serde_derive::{Deserialize, Serialize};
-use structopt::StructOpt;
+use circle_rs::{Infinite, Progress};
 use reqwest;
-use std::{thread, time::{Duration, Instant}};
+use serde_derive::{Deserialize, Serialize};
+use serde_json::Value;
+use structopt::StructOpt;
 
-pub const POLKAHUB_URL: &str = "";
-pub const PROJECTS: &str = "/api/v1/projects";
+pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
 
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
@@ -13,15 +13,42 @@ pub struct Project {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Payload {
-    repository_created: bool,
-    repo_url: String,
-    http_url: String,
-    ws_url: String,
+    pub status: String,
+    pub repo_url: String,
+    pub http_url: String,
+    pub ws_url: String,
+    pub repository_created: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct Success {
+    pub status: String,
+    pub payload: Payload,
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Response {
-    status: String,
-    payload: Payload,
+pub struct NotCreated {
+    pub status: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum Response {
+    Success(Success),
+    Fail(NotCreated),
+}
+
+impl Response {
+    /// Destructure and act upon the result
+    pub fn process(&self) {
+        match self {
+            Response::Success(s) => {
+                println!("success {:#?}", s);
+            }
+            Response::Fail(e) => {
+                println!("failed {:#?}", e);
+            }
+        }
+    }
 }
 
 impl Project {
@@ -34,20 +61,35 @@ impl Project {
             project_name: name,
         }
     }
-    pub async fn send_create_request(&self) -> Result<(), reqwest::Error> {
+    pub async fn send_create_request(&self, url: &str) -> Result<Response, reqwest::Error> {
         let client = reqwest::Client::new();
-        let result = client
-            .post("https://jsonplaceholder.typicode.com/posts")
-            .json(self)
-            .send()
-            .await?
-            .json()
-            .await?;
-        
-        thread::sleep(Duration::from_secs(20));
-        println!("{:#?}", result);
-        Ok(())
+
+        let mut loader = Infinite::new().to_stderr();
+        println!(
+            "\nCreating {:?} project. id: {:?} ",
+            self.project_name, self.account_id,
+        );
+        loader.set_msg("");
+        let _ = loader.start();
+
+        let result: Value = client.post(url).json(self).send().await?.json().await?;
+
+        let _ = loader.stop();
+        println!("\n{:#?}", result);
+
+        parse_response(result.to_string())
     }
+}
+
+pub fn parse_response(r: String) -> Result<Response, reqwest::Error> {
+    let response = match serde_json::from_str(&r) {
+        Ok(r) => Response::Success(Success { ..r }),
+        Err(e) => Response::Fail(NotCreated {
+            status: "json parse error".to_owned(),
+            reason: e.to_string(),
+        }),
+    };
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -55,7 +97,7 @@ mod tests {
     use super::*;
     const P_ID: u64 = 5;
     const P_NAME: &str = "NAME";
-
+    
     #[test]
     fn test_parse_works() {
         let project = Project::from(P_ID, P_NAME.to_owned());
@@ -67,10 +109,4 @@ mod tests {
             }
         );
     }
-    // #[test]
-    // fn test_send_works() {
-    //     let project = Project::from(P_ID, P_NAME.to_owned());
-    //     let result = project.send_create_request();
-    //     assert_eq!(result, ());
-    // }
 }

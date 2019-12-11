@@ -1,6 +1,6 @@
 [package]
 name = "polkahub"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Aleks Gnatovskyi <aleks.work2222@gmail.com>"]
 edition = "2018"
 
@@ -10,9 +10,8 @@ serde_derive = "1.0.103"
 serde = "1.0.103"
 serde_json = "1.0.44"
 reqwest = { version = "0.10.0-alpha.2", features =["json"] }
-futures = "0.3.1"
 tokio = { version = "=0.2.0-alpha.6" }
-indicatif = "0.13.0"
+circle-rs = "0.2.0"
 
 [lib]
 name="polkahub_lib"
