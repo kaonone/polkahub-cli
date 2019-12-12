@@ -13,7 +13,6 @@ pub struct Project {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Payload {
-    pub status: String,
     pub repo_url: String,
     pub http_url: String,
     pub ws_url: String,
@@ -45,14 +44,16 @@ impl Response {
                 let p = &s.payload;
 
                 println!("Success!");
-                println!("Repository available here:\n{:?}", p.repo_url);
+                println!("Repository available here: {:?}", p.repo_url);
                 println!("Endpoints:");
-                println!("https {:?}", p.http_url);
-                println!("https {:?}", p.ws_url);
-                println!("Success!");
+                println!("https -> {:?}", p.http_url);
+                println!("ws    -> {:?}", p.ws_url);
             }
             Response::Fail(e) => {
-                println!("Could not create project. Reason: {:?}", e.reason);
+                println!(
+                    "Could not create project.\nStatus: {:?}\nReason: {:?}",
+                    e.status, e.reason
+                );
             }
         }
     }
@@ -82,20 +83,25 @@ impl Project {
         let result: Value = client.post(url).json(self).send().await?.json().await?;
         let _ = loader.stop();
 
+        println!("{:#?}", result);
         parse_response(result.to_string())
     }
 }
 
 pub fn parse_response(r: String) -> Result<Response, reqwest::Error> {
     let response = match serde_json::from_str(&r) {
-        Ok(r) => Response::Success(Success { ..r }),
-        Err(_) => match serde_json::from_str(&r) {
+        Ok(r) => Response::Success(r),
+        Err(_) => parse_failure(r),
+    };
+    Ok(response)
+}
+
+pub fn parse_failure(r: String) -> Response {
+    match serde_json::from_str(&r) {
             Ok(r) => Response::Fail(NotCreated { ..r }),
             Err(e) => Response::Fail(NotCreated {
                 status: "json parse error".to_owned(),
                 reason: e.to_string(),
             }),
-        },
-    };
-    Ok(response)
+    }
 }
