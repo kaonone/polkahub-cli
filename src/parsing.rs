@@ -3,8 +3,33 @@ use reqwest;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use structopt::StructOpt;
+use termion::{color, style};
 
 pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
+
+pub fn print_green(s: &str) {
+    print!(
+        "{}{}{}",
+        color::Fg(color::LightGreen),
+        s,
+        color::Fg(color::Reset)
+    )
+}
+pub fn print_red(s: &str) {
+    print!("{}{}{}", color::Fg(color::Red), s, color::Fg(color::Reset))
+}
+pub fn print_blue(s: &str) {
+    print!(
+        "{}{}{}",
+        color::Fg(color::LightBlue),
+        s,
+        color::Fg(color::Reset)
+    )
+}
+
+pub fn print_italic(s: &str) {
+    print!("{}{}{}", style::Italic, s, style::Reset);
+}
 
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
@@ -43,17 +68,17 @@ impl Response {
             Response::Success(s) => {
                 let p = &s.payload;
 
-                println!("Success!");
-                println!("Repository available here: {:?}", p.repo_url);
-                println!("Endpoints:");
-                println!("https -> {:?}", p.http_url);
-                println!("ws    -> {:?}", p.ws_url);
+                print_green("done\n");
+                print_blue("https ");
+                println!(" -> {:?}", p.http_url);
+                print_blue("ws    ");
+                println!(" -> {:?}", p.ws_url);
+                print_italic("remote");
+                println!(" -> {:?}", p.repo_url);
             }
             Response::Fail(e) => {
-                println!(
-                    "Could not create project.\nStatus: {:?}\nReason: {:?}",
-                    e.status, e.reason
-                );
+                print_red("Could not create project.\n");
+                println!("Reason: {:?}", e.reason);
             }
         }
     }
@@ -63,6 +88,7 @@ impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
+    #[allow(unused)]
     pub fn from(id: u64, name: String) -> Project {
         Project {
             account_id: id,
@@ -83,7 +109,6 @@ impl Project {
         let result: Value = client.post(url).json(self).send().await?.json().await?;
         let _ = loader.stop();
 
-        println!("{:#?}", result);
         parse_response(result.to_string())
     }
 }
@@ -98,10 +123,10 @@ pub fn parse_response(r: String) -> Result<Response, reqwest::Error> {
 
 pub fn parse_failure(r: String) -> Response {
     match serde_json::from_str(&r) {
-            Ok(r) => Response::Fail(NotCreated { ..r }),
-            Err(e) => Response::Fail(NotCreated {
-                status: "json parse error".to_owned(),
-                reason: e.to_string(),
-            }),
+        Ok(r) => Response::Fail(NotCreated { ..r }),
+        Err(e) => Response::Fail(NotCreated {
+            status: "json parse error".to_owned(),
+            reason: e.to_string(),
+        }),
     }
 }
