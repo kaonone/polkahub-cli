@@ -1,6 +1,6 @@
 [package]
 name = "polkahub"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Aleks Gnatovskyi <aleks.work2222@gmail.com>"]
 edition = "2018"
 
@@ -12,11 +12,4 @@ serde_json = "1.0.44"
 reqwest = { version = "0.10.0-alpha.2", features =["json"] }
 tokio = { version = "=0.2.0-alpha.6" }
 circle-rs = "0.2.0"
-
-[lib]
-name="polkahub_lib"
-path="src/lib.rs"
-
-[[bin]]
-name="polkahub"
-path="src/main.rs"
+termion="1.5.3"
