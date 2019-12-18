@@ -4,6 +4,12 @@ version = "0.2.1"
 authors = ["Aleks Gnatovskyi <aleks.work2222@gmail.com>"]
 edition = "2018"
 
+description = "polkahub cli for easier blockchain deployment"
+keywords = ["cli", "node", "polkadot", "tooling", "deploy"]
+license = "MIT"
+repository = "https://github.com/akropolisio/polkahub-cli"
+homepage = "https://github.com/akropolisio/polkahub-cli"
+
 [dependencies]
 structopt = "0.3.5"
 serde_derive = "1.0.103"
