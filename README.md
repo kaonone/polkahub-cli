@@ -28,7 +28,7 @@ Then, depending on how you installed it you go either just **`polkahub`** or **`
 and you can create repo for your chain as simple as running:
 
 ```bash
-(cargo) polkahub <token> <project-name>
+(cargo) polkahub create <project-name>
 ```
 
 ### Build from source
@@ -48,3 +48,5 @@ git clone https://github.com/akropolisio/polkahub-cli.git \
 
 
 
+
+License: MIT
