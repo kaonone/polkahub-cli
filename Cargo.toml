@@ -1,7 +1,7 @@
 [package]
 name = "polkahub"
 version = "0.2.1"
-authors = ["Aleks Gnatovskyi <aleks.work2222@gmail.com>"]
+authors = ["Akropolis Decentralised Ltd., <team@akropolis.io>"]
 edition = "2018"
 
 description = "polkahub cli for easier blockchain deployment"
@@ -19,3 +19,6 @@ reqwest = { version = "0.10.0-alpha.2", features =["json"] }
 tokio = { version = "=0.2.0-alpha.6" }
 circle-rs = "0.2.0"
 termion="1.5.3"
+
+[profile.dev]
+
