@@ -2,39 +2,40 @@ use circle_rs::{Infinite, Progress};
 use reqwest;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{io, str::FromStr, string::ToString};
 use structopt::StructOpt;
 use termion::{color, style};
 
-pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
+// pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
+pub const POLKAHUB_URL: &str = "http://localhost:8080/api/v1/projects";
+pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 
 pub fn print_green(s: &str) {
-    print!(
-        "{}{}{}",
-        color::Fg(color::LightGreen),
-        s,
-        color::Fg(color::Reset)
-    )
+    let green = color::Fg(color::LightGreen);
+    let reset = color::Fg(color::Reset);
+    print!("{}{}{}", green, s, reset)
 }
 pub fn print_red(s: &str) {
     print!("{}{}{}", color::Fg(color::Red), s, color::Fg(color::Reset))
 }
 pub fn print_blue(s: &str) {
-    print!(
-        "{}{}{}",
-        color::Fg(color::LightBlue),
-        s,
-        color::Fg(color::Reset)
-    )
+    let blue = color::Fg(color::LightBlue);
+    let reset = color::Fg(color::Reset);
+    print!("{}{}{}", blue, s, reset)
 }
-
 pub fn print_italic(s: &str) {
     print!("{}{}{}", style::Italic, s, style::Reset);
 }
 
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Project {
+pub struct SendableProject {
     pub account_id: u64,
     pub project_name: String,
+}
+#[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Project {
+    pub action: String,
+    pub name: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Payload {
@@ -49,16 +50,41 @@ pub struct Success {
     pub status: String,
     pub payload: Payload,
 }
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct NotCreated {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Failure {
     pub status: String,
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Action {
+    Install,
+    Create,
+    Find,
+    Help,
+    InputError(Failure),
+}
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Response {
     Success(Success),
-    Fail(NotCreated),
+    Fail(Failure),
+}
+
+impl FromStr for Action {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "create" => Ok(Action::Create),
+            "find" => Ok(Action::Find),
+            "help" => Ok(Action::Help),
+            "install" => Ok(Action::Install),
+            _ => Ok(Action::InputError(Failure {
+                status: "input error".to_owned(),
+                reason: format!("{} - is invalid action. {}", s, HELP_NOTION),
+            })),
+        }
+    }
 }
 
 impl Response {
@@ -88,28 +114,42 @@ impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
-    #[allow(unused)]
-    pub fn from(id: u64, name: String) -> Project {
-        Project {
-            account_id: id,
-            project_name: name,
-        }
-    }
     pub async fn send_create_request(&self, url: &str) -> Result<Response, reqwest::Error> {
         let client = reqwest::Client::new();
 
         let mut loader = Infinite::new().to_stderr();
-        println!(
-            "\nCreating {:?} project. id: {:?} ",
-            self.project_name, self.account_id,
-        );
+        println!("\nCreating {:?} project", &self.name);
+
+        let name = self.name.clone().unwrap_or("".to_string());
+        let body = SendableProject {
+            account_id: 1,
+            project_name: name,
+        };
         loader.set_msg("");
 
         let _ = loader.start();
-        let result: Value = client.post(url).json(self).send().await?.json().await?;
+        let result: Value = client.post(url).json(&body).send().await?.json().await?;
         let _ = loader.stop();
 
         parse_response(result.to_string())
+    }
+    pub fn err(&self, e: Failure) {
+        print_red("It looks like something went wrong.\n");
+        println!("Reason: {:?}", e.reason);
+    }
+
+    pub fn parse_action(&self) -> Action {
+        let a_parsed = Action::from_str(&self.action);
+        match a_parsed {
+            Ok(action) => action,
+            Err(e) => {
+                println!("{} {:?}", self.action, e);
+                Action::InputError(Failure {
+                    status: "input error".to_owned(),
+                    reason: format!("{} - is invalid action. {}", self.action, HELP_NOTION),
+                })
+            }
+        }
     }
 }
 
@@ -123,10 +163,22 @@ pub fn parse_response(r: String) -> Result<Response, reqwest::Error> {
 
 pub fn parse_failure(r: String) -> Response {
     match serde_json::from_str(&r) {
-        Ok(r) => Response::Fail(NotCreated { ..r }),
-        Err(e) => Response::Fail(NotCreated {
+        Ok(r) => Response::Fail(Failure { ..r }),
+        Err(e) => Response::Fail(Failure {
             status: "json parse error".to_owned(),
             reason: e.to_string(),
         }),
     }
+}
+
+pub fn print_help() {
+    println!("Usage:");
+    print_blue("help ");
+    println!(" - list all possible options");
+    print_blue("install ");
+    println!(" - launch parachain node");
+    print_blue("find ");
+    println!(" - find all versions of your project");
+    print_blue("create ");
+    println!(" - register new parachain and create endpoints");
 }

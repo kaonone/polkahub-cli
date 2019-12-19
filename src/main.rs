@@ -3,45 +3,45 @@
 //!
 //!
 //! # !Status: Active WIP!
-//! 
+//!
 //! ## polkahub cli for easier blockchain deployment.
 //!
 //! ## Prerequisites
-//! 
-//! This tool is interesting for Substrate or another Rust-based chain developers, more likely 
+//!
+//! This tool is interesting for Substrate or another Rust-based chain developers, more likely
 //! for the Polkadot system, so we assume you already have [rust installed](https://doc.rust-lang.org/cargo/getting-started/installation.html).
-//! 
+//!
 //! ## Install
 //! ### Option 1: install with script
 //! ```bash
 //! bash <(curl http://get.polkahub.org/ -L)
 //! ```
 //! ### Option 2: just add it to cargo index
-//! 
+//!
 //! ```bash
 //! cargo install polkahub
 //! ```
-//! 
+//!
 //! Then, depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
 //! and you can create repo for your chain as simple as running:
-//! 
+//!
 //! ```bash
-//! (cargo) polkahub <token> <project-name>
+//! (cargo) polkahub create <project-name>
 //! ```
-//! 
+//!
 //! ## Build from source
-//! 
+//!
 //! If you want to build your own binary from source, you are welcome to do so!
-//! 
+//!
 //! ```bash
-//! 
+//!
 //! git clone https://github.com/akropolisio/polkahub-cli.git \
 //!     && cd polkahub-cli/         \
 //!     && cargo build --release    \
-//!     && sudo cp target/release/polkahub /usr/bin/polkahub 
-//! 
+//!     && sudo cp target/release/polkahub /usr/bin/polkahub
+//!
 //! ```
-//! 
+//!
 //!
 //!
 //!
@@ -50,15 +50,22 @@
 use reqwest;
 
 mod parsing;
-use parsing::{Project, POLKAHUB_URL};
-
+use parsing::{Action, Project, print_help, POLKAHUB_URL};
 
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
     let project = Project::new();
-    let hub = &format!("{}", POLKAHUB_URL);
-    let response = project.send_create_request(hub).await?;
-    response.process();
+
+    match project.parse_action() {
+        Action::Create => {
+            let response = project.send_create_request(POLKAHUB_URL).await?;
+            response.process();
+        }
+        Action::Help => print_help(),
+        Action::Find => unimplemented!(),
+        Action::Install => unimplemented!(),
+        Action::InputError(f) => project.err(f),
+    }
 
     Ok(())
 }
