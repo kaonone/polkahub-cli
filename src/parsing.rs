@@ -6,8 +6,7 @@ use std::{io, str::FromStr, string::ToString};
 use structopt::StructOpt;
 use termion::{color, style};
 
-// pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
-pub const POLKAHUB_URL: &str = "http://localhost:8080/api/v1/projects";
+pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 
 pub fn print_green(s: &str) {
