@@ -19,6 +19,7 @@ reqwest = { version = "0.10.0-alpha.2", features =["json"] }
 tokio = { version = "=0.2.0-alpha.6" }
 circle-rs = "0.2.0"
 termion="1.5.3"
+anyhow = "1.0"
 
 [profile.dev]
 

@@ -1,11 +1,14 @@
+use anyhow::{anyhow, Result};
 use circle_rs::{Infinite, Progress};
 use reqwest;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{io, str::FromStr, string::ToString};
 use structopt::StructOpt;
 use termion::{color, style};
 
+pub const INSTALL_URL: &str = "https://api.polkahub.org/api/v1/install";
+pub const FIND_URL: &str = "https://api.polkahub.org/api/v1/find";
 pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 
@@ -27,13 +30,9 @@ pub fn print_italic(s: &str) {
 }
 
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
-pub struct SendableProject {
-    pub account_id: u64,
-    pub project_name: String,
-}
-#[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
     pub action: String,
+    #[structopt(name = "name", long, short)]
     pub name: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
@@ -88,7 +87,7 @@ impl FromStr for Action {
 
 impl Response {
     /// Destructure and act upon the result
-    pub fn process(&self) {
+    pub fn handle_create(&self) {
         match self {
             Response::Success(s) => {
                 let p = &s.payload;
@@ -103,7 +102,7 @@ impl Response {
             }
             Response::Fail(e) => {
                 print_red("Could not create project.\n");
-                println!("Reason: {:?}", e.reason);
+                println!("Reason: {}", e.reason);
             }
         }
     }
@@ -113,28 +112,37 @@ impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
-    pub async fn send_create_request(&self, url: &str) -> Result<Response, reqwest::Error> {
+
+    pub fn err(&self, e: Failure) -> Result<()> {
+        print_red(&format!("{}\n", e.status));
+        println!();
+        Err(anyhow!("{}", e.reason))
+    }
+    pub async fn create(&self) -> Result<()> {
+        let response = self.send_create_request(POLKAHUB_URL).await?;
+        response.handle_create();
+        Ok(())
+    }
+    pub async fn send_create_request(&self, url: &str) -> Result<Response> {
         let client = reqwest::Client::new();
 
         let mut loader = Infinite::new().to_stderr();
-        println!("\nCreating {:?} project", &self.name);
-
         let name = self.name.clone().unwrap_or("".to_string());
-        let body = SendableProject {
-            account_id: 1,
-            project_name: name,
-        };
+        self.check_name(
+            name.clone(),
+            "You must provide name to create a project.".into(),
+        )?;
+        println!("\nCreating {} project", name);
+        let body = json!({
+            "account_id": 1,
+            "project_name": name,
+        });
         loader.set_msg("");
-
         let _ = loader.start();
         let result: Value = client.post(url).json(&body).send().await?.json().await?;
         let _ = loader.stop();
 
         parse_response(result.to_string())
-    }
-    pub fn err(&self, e: Failure) {
-        print_red("It looks like something went wrong.\n");
-        println!("Reason: {:?}", e.reason);
     }
 
     pub fn parse_action(&self) -> Action {
@@ -144,15 +152,25 @@ impl Project {
             Err(e) => {
                 println!("{} {:?}", self.action, e);
                 Action::InputError(Failure {
-                    status: "input error".to_owned(),
+                    status: "Input error".to_owned(),
                     reason: format!("{} - is invalid action. {}", self.action, HELP_NOTION),
                 })
             }
         }
     }
+    pub fn check_name(&self, name: String, reason: String) -> Result<()> {
+        if name.len() == 0 {
+            let f = Failure {
+                status: "Input error".to_owned(),
+                reason,
+            };
+            self.err(f)?;
+        }
+        Ok(())
+    }
 }
 
-pub fn parse_response(r: String) -> Result<Response, reqwest::Error> {
+pub fn parse_response(r: String) -> Result<Response> {
     let response = match serde_json::from_str(&r) {
         Ok(r) => Response::Success(r),
         Err(_) => parse_failure(r),
@@ -170,7 +188,7 @@ pub fn parse_failure(r: String) -> Response {
     }
 }
 
-pub fn print_help() {
+pub fn print_help() -> Result<()> {
     println!("Usage:");
     print_blue("help ");
     println!(" - list all possible options");
@@ -180,4 +198,5 @@ pub fn print_help() {
     println!(" - find all versions of your project");
     print_blue("create ");
     println!(" - register new parachain and create endpoints");
+    Ok(())
 }

@@ -22,7 +22,9 @@
 //! cargo install polkahub
 //! ```
 //!
-//! Then, depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
+//! ## Usage
+//!
+//! Depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
 //! and you can create repo for your chain as simple as running:
 //!
 //! ```bash
@@ -38,7 +40,8 @@
 //! git clone https://github.com/akropolisio/polkahub-cli.git \
 //!     && cd polkahub-cli/         \
 //!     && cargo build --release    \
-//!     && sudo cp target/release/polkahub /usr/bin/polkahub
+//!     && sudo cp target/release/polkahub /usr/bin/polkahub \
+//!     && sudo chmod +x /usr/bin/polkahub
 //!
 //! ```
 //!
@@ -46,26 +49,20 @@
 //!
 //!
 //!
-
-use reqwest;
+use anyhow::Result;
 
 mod parsing;
-use parsing::{Action, Project, print_help, POLKAHUB_URL};
+use parsing::{print_help, Action, Project};
 
 #[tokio::main]
-async fn main() -> Result<(), reqwest::Error> {
+async fn main() -> Result<()> {
     let project = Project::new();
 
     match project.parse_action() {
-        Action::Create => {
-            let response = project.send_create_request(POLKAHUB_URL).await?;
-            response.process();
-        }
+        Action::Create => project.create().await,
         Action::Help => print_help(),
         Action::Find => unimplemented!(),
         Action::Install => unimplemented!(),
         Action::InputError(f) => project.err(f),
     }
-
-    Ok(())
 }
