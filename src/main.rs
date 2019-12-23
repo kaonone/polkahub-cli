@@ -28,7 +28,7 @@
 //! and you can create repo for your chain as simple as running:
 //!
 //! ```bash
-//! (cargo) polkahub create <project-name>
+//! (cargo) polkahub --help
 //! ```
 //!
 //! ## Build from source
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
     match project.parse_action() {
         Action::Create => project.create().await,
         Action::Help => print_help(),
-        Action::Find => unimplemented!(),
+        Action::Find => project.find().await,
         Action::Install => unimplemented!(),
         Action::InputError(f) => project.err(f),
     }

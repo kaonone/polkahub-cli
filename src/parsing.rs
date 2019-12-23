@@ -7,9 +7,12 @@ use std::{io, str::FromStr, string::ToString};
 use structopt::StructOpt;
 use termion::{color, style};
 
-pub const INSTALL_URL: &str = "https://api.polkahub.org/api/v1/install";
-pub const FIND_URL: &str = "https://api.polkahub.org/api/v1/find";
-pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
+pub const POLKAHUB_URL: &str = "http://localhost:8080/api/v1/projects";
+pub const INSTALL_URL: &str = "http://localhost:8080/api/v1/install";
+pub const FIND_URL: &str = "http://localhost:8080/api/v1/find";
+// pub const INSTALL_URL: &str = "https://api.polkahub.org/api/v1/install";
+// pub const FIND_URL: &str = "https://api.polkahub.org/api/v1/find";
+// pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 
 pub fn print_green(s: &str) {
@@ -29,18 +32,32 @@ pub fn print_italic(s: &str) {
     print!("{}{}{}", style::Italic, s, style::Reset);
 }
 
+///
+/// create project in polkahub registry, 
+/// find all available versions for deploy,
+/// deploy specific version of your project to production
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
+    /// create, find, install <name> <version> 
     pub action: String,
-    #[structopt(name = "name", long, short)]
+    /// project name
     pub name: Option<String>,
+    /// install specific version
+    pub version: Option<String>,
 }
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Payload {
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CreatePayload {
     pub repo_url: String,
     pub http_url: String,
     pub ws_url: String,
     pub repository_created: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum Payload {
+    Create(CreatePayload),
+    Find(Vec<String>),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
@@ -68,6 +85,12 @@ pub enum Response {
     Fail(Failure),
 }
 
+impl Default for Payload {
+    fn default() -> Payload {
+        Payload::Find(Vec::new())
+    }
+}
+
 impl FromStr for Action {
     type Err = io::Error;
 
@@ -88,9 +111,15 @@ impl FromStr for Action {
 impl Response {
     /// Destructure and act upon the result
     pub fn handle_create(&self) {
-        match self {
+        match &self {
             Response::Success(s) => {
-                let p = &s.payload;
+                let mut p = CreatePayload::default();
+                match &s.payload {
+                    Payload::Create(c) => {
+                        p = c.clone();
+                    }
+                    _ => (),
+                };
 
                 print_green("done\n");
                 print_blue("https ");
@@ -102,6 +131,26 @@ impl Response {
             }
             Response::Fail(e) => {
                 print_red("Could not create project.\n");
+                println!("Reason: {}", e.reason);
+            }
+        }
+    }
+    pub fn handle_find(&self, name: &str) {
+        match self {
+            Response::Success(s) => {
+                let mut p = vec![];
+                match &s.payload {
+                    Payload::Find(f) => p = f.clone(),
+                    _ => (),
+                };
+
+                print_green("done\n");
+                p.iter().for_each(|v| {
+                    println!("{} {}", name, v);
+                })
+            }
+            Response::Fail(e) => {
+                print_red("Could not find project.\n");
                 println!("Reason: {}", e.reason);
             }
         }
@@ -123,10 +172,16 @@ impl Project {
         response.handle_create();
         Ok(())
     }
+    pub async fn find(&self) -> Result<()> {
+        let response = self.send_find_request(FIND_URL).await?;
+        let name = if let Some(n) = &self.name { &n } else { "" };
+        response.handle_find(name);
+        Ok(())
+    }
     pub async fn send_create_request(&self, url: &str) -> Result<Response> {
         let client = reqwest::Client::new();
-
         let mut loader = Infinite::new().to_stderr();
+
         let name = self.name.clone().unwrap_or("".to_string());
         self.check_name(
             name.clone(),
@@ -138,6 +193,28 @@ impl Project {
             "project_name": name,
         });
         loader.set_msg("");
+        let _ = loader.start();
+        let result: Value = client.post(url).json(&body).send().await?.json().await?;
+        let _ = loader.stop();
+
+        parse_response(result.to_string())
+    }
+
+    pub async fn send_find_request(&self, url: &str) -> Result<Response> {
+        let client = reqwest::Client::new();
+        let mut loader = Infinite::new().to_stderr();
+
+        let name = self.name.clone().unwrap_or("".to_string());
+        self.check_name(
+            name.clone(),
+            "You must provide a project name to look for.".into(),
+        )?;
+
+        let body = json!({
+            "name": name,
+        });
+        loader.set_msg("");
+
         let _ = loader.start();
         let result: Value = client.post(url).json(&body).send().await?.json().await?;
         let _ = loader.stop();

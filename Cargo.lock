@@ -649,7 +649,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "polkahub"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow 1.0.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "circle-rs 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
