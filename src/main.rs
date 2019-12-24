@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
         Action::Create => project.create().await,
         Action::Help => print_help(),
         Action::Find => project.find().await,
-        Action::Install => unimplemented!(),
+        Action::Install => project.install().await,
         Action::InputError(f) => project.err(f),
     }
 }

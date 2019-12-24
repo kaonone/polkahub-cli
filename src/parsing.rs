@@ -33,12 +33,12 @@ pub fn print_italic(s: &str) {
 }
 
 ///
-/// create project in polkahub registry, 
+/// create project in polkahub registry,
 /// find all available versions for deploy,
 /// deploy specific version of your project to production
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
-    /// create, find, install <name> <version> 
+    /// create, find, install <name> <version>
     pub action: String,
     /// project name
     pub name: Option<String>,
@@ -155,6 +155,31 @@ impl Response {
             }
         }
     }
+    pub fn handle_install(&self) {
+        match &self {
+            Response::Success(s) => {
+                let mut p = CreatePayload::default();
+                match &s.payload {
+                    Payload::Create(c) => {
+                        p = c.clone();
+                    }
+                    _ => (),
+                };
+
+                print_green("done\n");
+                print_blue("https ");
+                println!(" -> {:?}", p.http_url);
+                print_blue("ws    ");
+                println!(" -> {:?}", p.ws_url);
+                print_italic("remote");
+                println!(" -> {:?}", p.repo_url);
+            }
+            Response::Fail(e) => {
+                print_red("Could not create project.\n");
+                println!("Reason: {}", e.reason);
+            }
+        }
+    }
 }
 
 impl Project {
@@ -178,12 +203,18 @@ impl Project {
         response.handle_find(name);
         Ok(())
     }
+    pub async fn install(&self) -> Result<()> {
+        println!("{:?}", self);
+        let response = self.send_install_request(INSTALL_URL).await?;
+        response.handle_install();
+        Ok(())
+    }
     pub async fn send_create_request(&self, url: &str) -> Result<Response> {
         let client = reqwest::Client::new();
         let mut loader = Infinite::new().to_stderr();
 
         let name = self.name.clone().unwrap_or("".to_string());
-        self.check_name(
+        self.check_zero_len(
             name.clone(),
             "You must provide name to create a project.".into(),
         )?;
@@ -205,17 +236,46 @@ impl Project {
         let mut loader = Infinite::new().to_stderr();
 
         let name = self.name.clone().unwrap_or("".to_string());
-        self.check_name(
+        self.check_zero_len(
             name.clone(),
             "You must provide a project name to look for.".into(),
         )?;
 
         let body = json!({
-            "name": name,
+            "id": 1,
+            "project_name": name,
         });
         loader.set_msg("");
 
         let _ = loader.start();
+        // let url = &format!("{}{}", url, "?");
+        let result: Value = client.post(url).json(&body).send().await?.json().await?;
+        let _ = loader.stop();
+
+        parse_response(result.to_string())
+    }
+
+    pub async fn send_install_request(&self, url: &str) -> Result<Response> {
+        let client = reqwest::Client::new();
+        let mut loader = Infinite::new().to_stderr();
+
+        let name = self.name.clone().unwrap_or("".to_string());
+        let version = self.version.clone().unwrap_or("".to_string());
+        self.check_zero_len(name.clone(), "You must provide a project name.".into())?;
+        self.check_zero_len(
+            version.clone(),
+            "You must provide specific version to install.".into(),
+        )?;
+
+        let body = json!({
+            "id": 1,
+            "project_name": name,
+            "version": version,
+        });
+        loader.set_msg("");
+
+        let _ = loader.start();
+        // let url = &format!("{}{}", url, "?");
         let result: Value = client.post(url).json(&body).send().await?.json().await?;
         let _ = loader.stop();
 
@@ -235,8 +295,8 @@ impl Project {
             }
         }
     }
-    pub fn check_name(&self, name: String, reason: String) -> Result<()> {
-        if name.len() == 0 {
+    pub fn check_zero_len(&self, s: String, reason: String) -> Result<()> {
+        if s.len() == 0 {
             let f = Failure {
                 status: "Input error".to_owned(),
                 reason,
