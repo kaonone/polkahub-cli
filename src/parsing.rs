@@ -118,8 +118,10 @@ impl Response {
                 println!(" -> {:?}", p.repo_url);
             }
             Response::Fail(e) => {
-                print_red("Could not create project.\n");
-                println!("Reason: {}", e.reason);
+                let _ = err(Failure {
+                    status: "Could not create project.\n".into(),
+                    reason: format!("Reason: {}", e.reason),
+                });
             }
             _ => unreachable!(),
         }
@@ -129,13 +131,20 @@ impl Response {
             Response::Found(s) => {
                 let p = &s.payload;
 
-                p.iter().for_each(|v| {
-                    println!("{} {}", name, v);
-                })
+                if p.len() == 0 {
+                    print_green("Looks like no versions deployed yet!\n");
+                    print!("");
+                } else {
+                    p.iter().for_each(|v| {
+                        println!("{} {}", name, v);
+                    })
+                }
             }
             Response::Fail(e) => {
-                print_red("Could not find project.\n");
-                println!("Reason: {}", e.reason);
+                let _ = err(Failure {
+                    status: "Could not find project.\n".into(),
+                    reason: format!("Reason: {}", e.reason),
+                });
             }
             _ => unreachable!(),
         }
@@ -164,14 +173,6 @@ impl Response {
 impl Project {
     pub fn new() -> Project {
         Project::from_args()
-    }
-
-    pub fn err(&self, e: Failure) -> Result<()> {
-        let frame: String = e.status.chars().map(|_| '—').collect();
-        println!(" {}", frame);
-        print_red(&format!(" {}", e.status));
-        println!("\n {}", frame);
-        Err(anyhow!("{}", e.reason))
     }
     pub async fn create(&self) -> Result<()> {
         let response = self.send_create_request(POLKAHUB_URL).await?;
@@ -214,7 +215,6 @@ impl Project {
             "account_id": 1,
             "project_name": name,
         });
-        
         println!("\nCreating {} project", name);
         self.post_request(url, body).await
     }
@@ -227,14 +227,13 @@ impl Project {
         )?;
 
         let body = json!({
-            "id": 1,
+            "account_id": 1,
             "project_name": name,
         });
 
-        println!("Looking for {} project", name);
+        println!("\nLooking for {} project", name);
         self.post_request(url, body).await
     }
-    
     async fn send_install_request(&self, url: &str) -> Result<Response> {
         let name = self.name.clone().unwrap_or("".to_string());
         let version = self.version.clone().unwrap_or("".to_string());
@@ -243,14 +242,12 @@ impl Project {
             version.clone(),
             "You must provide specific version to install.".into(),
         )?;
-        
         let body = json!({
             "account_id": 1,
             "project_name": name,
             "version": version,
         });
-        
-        println!("Deploying {} project with version {}", name, version);
+        println!("\nDeploying {} project with version {}", name, version);
         self.post_request(url, body).await
     }
 
@@ -272,7 +269,7 @@ impl Project {
                 status: "Input error".to_owned(),
                 reason,
             };
-            self.err(f)?;
+            err(f)?;
         }
         Ok(())
     }
@@ -283,10 +280,7 @@ pub fn parse_response(r: String) -> Result<Response> {
         Ok(r) => Ok(Response::Created(r)),
         Err(_) => match serde_json::from_str(&r) {
             Ok(r) => Ok(Response::Found(r)),
-            Err(e) => {
-                print_blue(&format!("serde success fail response {:?}\n", e));
-                Ok(parse_failure(&r))
-            }
+            Err(_) => Ok(parse_failure(&r)),
         },
     }
 }
@@ -312,4 +306,12 @@ pub fn print_help() -> Result<()> {
     print_blue("create ");
     println!(" - register new parachain and create endpoints");
     Ok(())
+}
+
+pub fn err(e: Failure) -> Result<()> {
+    let frame: String = e.status.chars().map(|_| '—').collect();
+    println!(" {}", frame);
+    print_red(&format!(" {}", e.status));
+    println!("\n {}", frame);
+    Err(anyhow!("{}", e.reason))
 }

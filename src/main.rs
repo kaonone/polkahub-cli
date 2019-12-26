@@ -52,7 +52,7 @@
 use anyhow::Result;
 
 mod parsing;
-use parsing::{print_help, Action, Project};
+use parsing::{print_help, err, Action, Project};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -63,6 +63,6 @@ async fn main() -> Result<()> {
         Action::Help => print_help(),
         Action::Find => project.find().await,
         Action::Install => project.install().await,
-        Action::InputError(f) => project.err(f),
+        Action::InputError(f) => err(f),
     }
 }
