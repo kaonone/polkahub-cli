@@ -38,11 +38,14 @@ pub fn print_italic(s: &str) {
 /// deploy specific version of your project to production
 #[derive(StructOpt, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Project {
-    /// create, find, install <name> <version>
+    /// create <name>, find <name>, install <name> <version>
+    /// 
     pub action: String,
-    /// project name
+    /// project name 
+    /// 
     pub name: Option<String>,
-    /// install specific version
+    /// install specific version (typically a result of `find`)
+    /// 
     pub version: Option<String>,
 }
 
@@ -149,25 +152,6 @@ impl Response {
             _ => unreachable!(),
         }
     }
-    pub fn handle_install(&self) {
-        // match &self {
-        //     Response::Created(s) => {
-        //         let mut p = s.payload;
-
-        //         print_green("done\n");
-        //         print_blue("https ");
-        //         println!(" -> {:?}", p.http_url);
-        //         print_blue("ws    ");
-        //         println!(" -> {:?}", p.ws_url);
-        //         print_italic("remote");
-        //         println!(" -> {:?}", p.repo_url);
-        //     }
-        //     Response::Fail(e) => {
-        //         print_red("Could not create project.\n");
-        //         println!("Reason: {}", e.reason);
-        //     }
-        // }
-    }
 }
 
 impl Project {
@@ -186,9 +170,8 @@ impl Project {
         Ok(())
     }
     pub async fn install(&self) -> Result<()> {
-        println!("{:?}", self);
         let response = self.send_install_request(INSTALL_URL).await?;
-        response.handle_install();
+        response.handle_create();
         Ok(())
     }
 
