@@ -47,23 +47,22 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct CreatePayload {
+pub struct Payload {
     pub repo_url: String,
     pub http_url: String,
     pub ws_url: String,
     pub repository_created: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum Payload {
-    Create(CreatePayload),
-    Find(Vec<String>),
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Success {
+pub struct Created {
     pub status: String,
     pub payload: Payload,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct Found {
+    pub status: String,
+    pub payload: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Failure {
@@ -81,14 +80,9 @@ pub enum Action {
 }
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Response {
-    Success(Success),
+    Created(Created),
+    Found(Found),
     Fail(Failure),
-}
-
-impl Default for Payload {
-    fn default() -> Payload {
-        Payload::Find(Vec::new())
-    }
 }
 
 impl FromStr for Action {
@@ -112,14 +106,8 @@ impl Response {
     /// Destructure and act upon the result
     pub fn handle_create(&self) {
         match &self {
-            Response::Success(s) => {
-                let mut p = CreatePayload::default();
-                match &s.payload {
-                    Payload::Create(c) => {
-                        p = c.clone();
-                    }
-                    _ => (),
-                };
+            Response::Created(s) => {
+                let p = &s.payload;
 
                 print_green("done\n");
                 print_blue("https ");
@@ -133,18 +121,14 @@ impl Response {
                 print_red("Could not create project.\n");
                 println!("Reason: {}", e.reason);
             }
+            _ => unreachable!(),
         }
     }
     pub fn handle_find(&self, name: &str) {
         match self {
-            Response::Success(s) => {
-                let mut p = vec![];
-                match &s.payload {
-                    Payload::Find(f) => p = f.clone(),
-                    _ => (),
-                };
+            Response::Found(s) => {
+                let p = &s.payload;
 
-                print_green("done\n");
                 p.iter().for_each(|v| {
                     println!("{} {}", name, v);
                 })
@@ -153,32 +137,27 @@ impl Response {
                 print_red("Could not find project.\n");
                 println!("Reason: {}", e.reason);
             }
+            _ => unreachable!(),
         }
     }
     pub fn handle_install(&self) {
-        match &self {
-            Response::Success(s) => {
-                let mut p = CreatePayload::default();
-                match &s.payload {
-                    Payload::Create(c) => {
-                        p = c.clone();
-                    }
-                    _ => (),
-                };
+        // match &self {
+        //     Response::Created(s) => {
+        //         let mut p = s.payload;
 
-                print_green("done\n");
-                print_blue("https ");
-                println!(" -> {:?}", p.http_url);
-                print_blue("ws    ");
-                println!(" -> {:?}", p.ws_url);
-                print_italic("remote");
-                println!(" -> {:?}", p.repo_url);
-            }
-            Response::Fail(e) => {
-                print_red("Could not create project.\n");
-                println!("Reason: {}", e.reason);
-            }
-        }
+        //         print_green("done\n");
+        //         print_blue("https ");
+        //         println!(" -> {:?}", p.http_url);
+        //         print_blue("ws    ");
+        //         println!(" -> {:?}", p.ws_url);
+        //         print_italic("remote");
+        //         println!(" -> {:?}", p.repo_url);
+        //     }
+        //     Response::Fail(e) => {
+        //         print_red("Could not create project.\n");
+        //         println!("Reason: {}", e.reason);
+        //     }
+        // }
     }
 }
 
@@ -188,8 +167,10 @@ impl Project {
     }
 
     pub fn err(&self, e: Failure) -> Result<()> {
-        print_red(&format!("{}\n", e.status));
-        println!();
+        let frame: String = e.status.chars().map(|_| '—').collect();
+        println!(" {}", frame);
+        print_red(&format!(" {}", e.status));
+        println!("\n {}", frame);
         Err(anyhow!("{}", e.reason))
     }
     pub async fn create(&self) -> Result<()> {
@@ -209,78 +190,6 @@ impl Project {
         response.handle_install();
         Ok(())
     }
-    pub async fn send_create_request(&self, url: &str) -> Result<Response> {
-        let client = reqwest::Client::new();
-        let mut loader = Infinite::new().to_stderr();
-
-        let name = self.name.clone().unwrap_or("".to_string());
-        self.check_zero_len(
-            name.clone(),
-            "You must provide name to create a project.".into(),
-        )?;
-        println!("\nCreating {} project", name);
-        let body = json!({
-            "account_id": 1,
-            "project_name": name,
-        });
-        loader.set_msg("");
-        let _ = loader.start();
-        let result: Value = client.post(url).json(&body).send().await?.json().await?;
-        let _ = loader.stop();
-
-        parse_response(result.to_string())
-    }
-
-    pub async fn send_find_request(&self, url: &str) -> Result<Response> {
-        let client = reqwest::Client::new();
-        let mut loader = Infinite::new().to_stderr();
-
-        let name = self.name.clone().unwrap_or("".to_string());
-        self.check_zero_len(
-            name.clone(),
-            "You must provide a project name to look for.".into(),
-        )?;
-
-        let body = json!({
-            "id": 1,
-            "project_name": name,
-        });
-        loader.set_msg("");
-
-        let _ = loader.start();
-        // let url = &format!("{}{}", url, "?");
-        let result: Value = client.post(url).json(&body).send().await?.json().await?;
-        let _ = loader.stop();
-
-        parse_response(result.to_string())
-    }
-
-    pub async fn send_install_request(&self, url: &str) -> Result<Response> {
-        let client = reqwest::Client::new();
-        let mut loader = Infinite::new().to_stderr();
-
-        let name = self.name.clone().unwrap_or("".to_string());
-        let version = self.version.clone().unwrap_or("".to_string());
-        self.check_zero_len(name.clone(), "You must provide a project name.".into())?;
-        self.check_zero_len(
-            version.clone(),
-            "You must provide specific version to install.".into(),
-        )?;
-
-        let body = json!({
-            "id": 1,
-            "project_name": name,
-            "version": version,
-        });
-        loader.set_msg("");
-
-        let _ = loader.start();
-        // let url = &format!("{}{}", url, "?");
-        let result: Value = client.post(url).json(&body).send().await?.json().await?;
-        let _ = loader.stop();
-
-        parse_response(result.to_string())
-    }
 
     pub fn parse_action(&self) -> Action {
         let a_parsed = Action::from_str(&self.action);
@@ -295,7 +204,69 @@ impl Project {
             }
         }
     }
-    pub fn check_zero_len(&self, s: String, reason: String) -> Result<()> {
+    async fn send_create_request(&self, url: &str) -> Result<Response> {
+        let name = self.name.clone().unwrap_or("".to_string());
+        self.check_zero_len(
+            name.clone(),
+            "You must provide name to create a project.".into(),
+        )?;
+        let body = json!({
+            "account_id": 1,
+            "project_name": name,
+        });
+        
+        println!("\nCreating {} project", name);
+        self.post_request(url, body).await
+    }
+
+    async fn send_find_request(&self, url: &str) -> Result<Response> {
+        let name = self.name.clone().unwrap_or("".to_string());
+        self.check_zero_len(
+            name.clone(),
+            "You must provide a project name to look for.".into(),
+        )?;
+
+        let body = json!({
+            "id": 1,
+            "project_name": name,
+        });
+
+        println!("Looking for {} project", name);
+        self.post_request(url, body).await
+    }
+    
+    async fn send_install_request(&self, url: &str) -> Result<Response> {
+        let name = self.name.clone().unwrap_or("".to_string());
+        let version = self.version.clone().unwrap_or("".to_string());
+        self.check_zero_len(name.clone(), "You must provide a project name.".into())?;
+        self.check_zero_len(
+            version.clone(),
+            "You must provide specific version to install.".into(),
+        )?;
+        
+        let body = json!({
+            "account_id": 1,
+            "project_name": name,
+            "version": version,
+        });
+        
+        println!("Deploying {} project with version {}", name, version);
+        self.post_request(url, body).await
+    }
+
+    async fn post_request(&self, url: &str, body: Value) -> Result<Response> {
+        let client = reqwest::Client::new();
+        let mut loader = Infinite::new().to_stderr();
+        loader.set_msg("");
+
+        let _ = loader.start();
+        let result: Value = client.post(url).json(&body).send().await?.json().await?;
+        let _ = loader.stop();
+
+        parse_response(result.to_string())
+    }
+
+    fn check_zero_len(&self, s: String, reason: String) -> Result<()> {
         if s.len() == 0 {
             let f = Failure {
                 status: "Input error".to_owned(),
@@ -308,14 +279,19 @@ impl Project {
 }
 
 pub fn parse_response(r: String) -> Result<Response> {
-    let response = match serde_json::from_str(&r) {
-        Ok(r) => Response::Success(r),
-        Err(_) => parse_failure(r),
-    };
-    Ok(response)
+    match serde_json::from_str(&r) {
+        Ok(r) => Ok(Response::Created(r)),
+        Err(_) => match serde_json::from_str(&r) {
+            Ok(r) => Ok(Response::Found(r)),
+            Err(e) => {
+                print_blue(&format!("serde success fail response {:?}\n", e));
+                Ok(parse_failure(&r))
+            }
+        },
+    }
 }
 
-pub fn parse_failure(r: String) -> Response {
+pub fn parse_failure(r: &str) -> Response {
     match serde_json::from_str(&r) {
         Ok(r) => Response::Fail(Failure { ..r }),
         Err(e) => Response::Fail(Failure {
