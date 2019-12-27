@@ -24,11 +24,17 @@ bash <(curl http://get.polkahub.org/ -L)
 cargo install polkahub
 ```
 
-Then, depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
-and you can create repo for your chain as simple as running:
+### Usage
+
+Depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
+and you can create repo for your chain. To explore all the :
 
 ```bash
-(cargo) polkahub create <project-name>
+(cargo) polkahub --help
+```
+or
+```bash
+(cargo) polkahub help
 ```
 
 ### Build from source
@@ -40,7 +46,8 @@ If you want to build your own binary from source, you are welcome to do so!
 git clone https://github.com/akropolisio/polkahub-cli.git \
     && cd polkahub-cli/         \
     && cargo build --release    \
-    && sudo cp target/release/polkahub /usr/bin/polkahub
+    && sudo cp target/release/polkahub /usr/bin/polkahub \
+    && sudo chmod +x /usr/bin/polkahub
 
 ```
 

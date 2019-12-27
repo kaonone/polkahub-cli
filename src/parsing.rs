@@ -416,7 +416,10 @@ pub(crate) async fn read_hubfile(path: String) -> Result<Hub> {
     let trimmed = path.split("Hub.toml").nth(0).unwrap_or_else(|| &path);
     let file_path = Path::new(&trimmed).join("Hub.toml");
     let mut hub_file = vec![];
-    let mut file = File::open(file_path).await?;
+    let mut file = match File::open(file_path).await{
+        Ok(f) => f,
+        Err(_) => return Ok(Hub::default())
+    };
     file.read_to_end(&mut hub_file).await?;
     match String::from_utf8(hub_file) {
         Ok(f) => Ok(parse_toml(&f)),
