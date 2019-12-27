@@ -25,10 +25,14 @@
 //! ## Usage
 //!
 //! Depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
-//! and you can create repo for your chain as simple as running:
+//! and you can create repo for your chain. To explore all the :
 //!
 //! ```bash
-//! (cargo) polkahub --help
+//! (cargo) polkahub --help  
+//! ```
+//! or 
+//! ```bash
+//! (cargo) polkahub help
 //! ```
 //!
 //! ## Build from source
