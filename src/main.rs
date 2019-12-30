@@ -25,10 +25,14 @@
 //! ## Usage
 //!
 //! Depending on how you installed it you go either just **`polkahub`** or **`cargo polkahub`** in the next step
-//! and you can create repo for your chain as simple as running:
+//! and you can create repo for your chain. To explore all the :
 //!
 //! ```bash
-//! (cargo) polkahub --help
+//! (cargo) polkahub --help  
+//! ```
+//! or 
+//! ```bash
+//! (cargo) polkahub help
 //! ```
 //!
 //! ## Build from source
@@ -52,7 +56,7 @@
 use anyhow::Result;
 
 mod parsing;
-use parsing::{print_help, Action, Project};
+use parsing::{print_help, err, Action, Project};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -62,7 +66,7 @@ async fn main() -> Result<()> {
         Action::Create => project.create().await,
         Action::Help => print_help(),
         Action::Find => project.find().await,
-        Action::Install => unimplemented!(),
-        Action::InputError(f) => project.err(f),
+        Action::Install => project.install().await,
+        Action::InputError(f) => err(f),
     }
 }
