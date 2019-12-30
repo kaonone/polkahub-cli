@@ -383,7 +383,8 @@ pub fn err(e: Failure) -> Result<()> {
     let frame: String = e.status.chars().map(|_| '—').collect();
     println!(" {}", frame);
     print_red(&format!(" {}", e.status));
-    println!("\n {}", frame);
+    println!(" {}", frame);
+    println!("{}", e.reason);
     Err(anyhow!("{}", e.reason))
 }
 
