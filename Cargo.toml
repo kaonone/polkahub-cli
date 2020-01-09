@@ -1,6 +1,6 @@
 [package]
 name = "polkahub"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["Akropolis Decentralised Ltd., <team@akropolis.io>"]
 edition = "2018"
 

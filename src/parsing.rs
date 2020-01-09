@@ -9,9 +9,9 @@ use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
 use toml;
 
-pub const INSTALL_URL: &str = "https://api.polkahub.org/api/v1/install";
-pub const FIND_URL: &str = "https://api.polkahub.org/api/v1/find";
-pub const POLKAHUB_URL: &str = "https://api.polkahub.org/api/v1/projects";
+pub const INSTALL_URL: &str = "https://api-test.polkahub.org/api/v1/install";
+pub const FIND_URL: &str = "https://api-test.polkahub.org/api/v1/find";
+pub const POLKAHUB_URL: &str = "https://api-test.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 
 pub fn print_green(s: &str) {
