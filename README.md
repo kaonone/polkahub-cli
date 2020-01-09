@@ -56,4 +56,4 @@ git clone https://github.com/akropolisio/polkahub-cli.git \
 
 
 
-License: MIT
+License: Apache 2.0
