@@ -4,7 +4,12 @@ use reqwest;
 use rpassword;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{io::{self, Write}, path::Path, str::FromStr, string::ToString};
+use std::{
+    io::{self, Write},
+    path::Path,
+    str::FromStr,
+    string::ToString,
+};
 use structopt::StructOpt;
 use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -232,7 +237,7 @@ impl Response {
             Response::Found(s) => {
                 let p = &s.payload;
 
-                if p.len() == 0 {
+                if p.is_empty() {
                     print_green("Looks like no versions deployed yet!\n");
                     print!("");
                 } else {
@@ -293,7 +298,9 @@ impl Project {
 
     pub async fn register(&self) -> Result<()> {
         let (email, password) = (read_email()?, read_password()?);
-        let response = self.send_register_request(REGISTER_URL, &email, &password).await?;
+        let response = self
+            .send_register_request(REGISTER_URL, &email, &password)
+            .await?;
         response.handle_register();
         Ok(())
     }
@@ -310,7 +317,7 @@ impl Project {
     }
 
     async fn send_create_request(&self, url: &str) -> Result<Response> {
-        let name = self.name.clone().unwrap_or("".to_string());
+        let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide name to create a project.".into())?;
         let body = json!({
             "account_id": 1,
@@ -321,7 +328,7 @@ impl Project {
     }
 
     async fn send_find_request(&self, url: &str) -> Result<Response> {
-        let name = self.name.clone().unwrap_or("".to_string());
+        let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide a project name to look for.".into())?;
 
         let body = json!({
@@ -346,7 +353,12 @@ impl Project {
         self.post_request(url, body).await
     }
 
-    async fn send_register_request(&self, url: &str, email: &str, password: &str) -> Result<Response> {
+    async fn send_register_request(
+        &self,
+        url: &str,
+        email: &str,
+        password: &str,
+    ) -> Result<Response> {
         let body = json!({
             "email": email,
             "password": password,
@@ -369,11 +381,11 @@ impl Project {
 
     /// split project with version
     fn version_split(&self) -> Result<(String, String)> {
-        let s = self.name.clone().unwrap_or("".to_string());
+        let s = self.name.clone().unwrap_or_else(|| "".to_string());
         check_version(s.clone())?;
 
-        let project_name = s.split("@").nth(0).unwrap_or(&s).to_string();
-        let v = s.split("@").nth(1).unwrap_or("").to_string();
+        let project_name = s.split('@').nth(0).unwrap_or(&s).to_string();
+        let v = s.split('@').nth(1).unwrap_or("").to_string();
 
         Ok((project_name, v))
     }
@@ -383,7 +395,7 @@ impl Project {
         let hub_file = self.hub_file.clone().unwrap_or_else(|| {
             // print warning if you provide an alias but have name in Hub.toml
             // (priority concerns)
-            if let None = self.alias.clone() {
+            if self.alias.is_none() {
                 print_yellow("WARN: ");
                 print_italic("No Hub.toml path provided, looking in root directory\n");
             }
@@ -391,7 +403,7 @@ impl Project {
         });
         let hub = read_hubfile(hub_file).await?;
         // if hub exist take values from there
-        let (app_name, version) = if let Some(p) = hub.parachain.clone() {
+        let (app_name, version) = if let Some(p) = hub.parachain {
             (p.name, p.version)
         } else {
             // or take either alias or project name if none provided
@@ -415,7 +427,7 @@ pub fn parse_response(r: String) -> Result<Response> {
                 Err(_) => match serde_json::from_str(&r) {
                     Ok(r) => Ok(Response::Registered(r)),
                     Err(_) => Ok(parse_failure(&r)),
-                }
+                },
             },
         },
     }
@@ -454,7 +466,7 @@ pub fn err(e: Failure) -> Result<()> {
 }
 
 fn check_zero_len(s: &str, reason: String) -> Result<()> {
-    if s.len() == 0 {
+    if s.is_empty() {
         let f = Failure {
             status: "Input error".to_owned(),
             reason,
@@ -467,7 +479,7 @@ fn check_zero_len(s: &str, reason: String) -> Result<()> {
 
 fn check_version(s: String) -> Result<()> {
     check_zero_len(&s, "You must provide a project name.".into())?;
-    if !s.contains("@") {
+    if !s.contains('@') {
         let f = Failure {
             status: "Input error".to_owned(),
             reason: "You must provide specific version to install: <project_name>@<version>"
@@ -483,9 +495,9 @@ pub(crate) async fn read_hubfile(path: String) -> Result<Hub> {
     let trimmed = path.split("Hub.toml").nth(0).unwrap_or_else(|| &path);
     let file_path = Path::new(&trimmed).join("Hub.toml");
     let mut hub_file = vec![];
-    let mut file = match File::open(file_path).await{
+    let mut file = match File::open(file_path).await {
         Ok(f) => f,
-        Err(_) => return Ok(Hub::default())
+        Err(_) => return Ok(Hub::default()),
     };
     file.read_to_end(&mut hub_file).await?;
     match String::from_utf8(hub_file) {
@@ -510,7 +522,7 @@ fn read_email() -> Result<String> {
     let email = email.trim();
     if !&email.contains('@') {
         let msg = "Email is invalid".to_string();
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
     }
     Ok(email.to_string())
 }
@@ -520,15 +532,15 @@ fn read_password() -> Result<String> {
     let confirm_password = rpassword::read_password_from_tty(Some("Confirm Password: ")).unwrap();
     if password.len() < MIN_PASSWORD_LENGTH {
         let msg = format!("Password shorter than {} characters", MIN_PASSWORD_LENGTH);
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
     }
-    if password.len() > MAX_PASSWORD_LENGTH  {
+    if password.len() > MAX_PASSWORD_LENGTH {
         let msg = format!("Password longer than {} characters", MAX_PASSWORD_LENGTH);
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
     }
     if password != confirm_password {
         let msg = "Password does not equal Confirm password".to_string();
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
     }
     Ok(password)
 }

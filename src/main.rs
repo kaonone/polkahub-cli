@@ -6,13 +6,13 @@
 //! ### Prerequisites
 //! MacOS/Linux: none. </br>
 //! Windows: docker utility installed
-//! 
+//!
 //! ## **Windows**
 //! On Windows machine you better use it through pre-compiled docker image like this:
 //! ```bash
 //! docker run --rm -u`id -u`:`id -g` registry.polkahub.org/polkahub-cli:v1 <action> [ARGS]
 //! ```
-//! 
+//!
 //! ## **MacOS / Linux**
 //! ### Install
 //! #### Option 1: install with script
@@ -56,7 +56,7 @@
 use anyhow::Result;
 
 mod parsing;
-use parsing::{print_help, err, Action, Project};
+use parsing::{err, print_help, Action, Project};
 
 #[tokio::main]
 async fn main() -> Result<()> {
