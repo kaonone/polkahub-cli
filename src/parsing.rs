@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Result};
 use circle_rs::{Infinite, Progress};
 use reqwest;
+use rpassword;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{io, path::Path, str::FromStr, string::ToString};
+use std::{io::{self, Write}, path::Path, str::FromStr, string::ToString};
 use structopt::StructOpt;
 use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -11,24 +12,31 @@ use toml;
 
 pub const INSTALL_URL: &str = "https://api-test.polkahub.org/api/v1/install";
 pub const FIND_URL: &str = "https://api-test.polkahub.org/api/v1/find";
+pub const REGISTER_URL: &str = "https://api-test.polkahub.org/api/v1/signup";
 pub const POLKAHUB_URL: &str = "https://api-test.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
+const MIN_PASSWORD_LENGTH: usize = 8;
+const MAX_PASSWORD_LENGTH: usize = 50;
 
 pub fn print_green(s: &str) {
     let green = color::Fg(color::LightGreen);
     print!("{}{}{}", green, s, color::Fg(color::Reset))
 }
+
 pub fn print_red(s: &str) {
     print!("{}{}{}", color::Fg(color::Red), s, color::Fg(color::Reset))
 }
+
 pub fn print_yellow(s: &str) {
     let yellow = color::Fg(color::LightYellow);
     print!("{}{}{}", yellow, s, color::Fg(color::Reset))
 }
+
 pub fn print_blue(s: &str) {
     let blue = color::Fg(color::LightBlue);
     print!("{}{}{}", blue, s, color::Fg(color::Reset))
 }
+
 pub fn print_italic(s: &str) {
     print!("{}{}{}", style::Italic, s, style::Reset);
 }
@@ -40,6 +48,7 @@ pub struct Hub {
     chainspec: Option<Chainspec>,
     node: Option<Node>,
 }
+
 ///Parachain meta info
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Parachain {
@@ -47,11 +56,13 @@ struct Parachain {
     description: String,
     version: String,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Chainspec {
     version: String,
     path: String,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Node {
     telemetry_url: String,
@@ -87,6 +98,7 @@ pub struct Payload {
     pub ws_url: String,
     pub repository_created: bool,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct InstallPayload {
     pub http_url: String,
@@ -98,16 +110,24 @@ pub struct Created {
     pub status: String,
     pub payload: Payload,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Found {
     pub status: String,
     pub payload: Vec<String>,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Installed {
     pub status: String,
     pub payload: InstallPayload,
 }
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct Registered {
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Failure {
     pub status: String,
@@ -119,14 +139,17 @@ pub enum Action {
     Install,
     Create,
     Find,
+    Register,
     Help,
     InputError(Failure),
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Response {
     Created(Created),
     Found(Found),
     Installed(Installed),
+    Registered(Registered),
     Fail(Failure),
 }
 
@@ -139,6 +162,7 @@ impl FromStr for Action {
             "find" => Ok(Action::Find),
             "help" => Ok(Action::Help),
             "install" => Ok(Action::Install),
+            "register" => Ok(Action::Register),
             _ => Ok(Action::InputError(Failure {
                 status: "input error".to_owned(),
                 reason: format!("{} - is invalid action. {}", s, HELP_NOTION),
@@ -181,6 +205,7 @@ impl Response {
             _ => unreachable!(),
         }
     }
+
     pub fn handle_install(&self) {
         match &self {
             Response::Installed(s) => {
@@ -201,6 +226,7 @@ impl Response {
             _ => unreachable!(),
         }
     }
+
     pub fn handle_find(&self, name: &str) {
         match self {
             Response::Found(s) => {
@@ -224,26 +250,51 @@ impl Response {
             _ => unreachable!(),
         }
     }
+
+    pub fn handle_register(&self) {
+        match &self {
+            Response::Registered(_s) => {
+                print_green("done\n");
+            }
+            Response::Fail(e) => {
+                let _ = err(Failure {
+                    status: "Could not register new user.\n".into(),
+                    reason: format!("Reason: {}", e.reason),
+                });
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
+
     pub async fn create(&self) -> Result<()> {
         let response = self.send_create_request(POLKAHUB_URL).await?;
         response.handle_create();
         Ok(())
     }
+
     pub async fn find(&self) -> Result<()> {
         let response = self.send_find_request(FIND_URL).await?;
         let name = if let Some(n) = &self.name { &n } else { "" };
         response.handle_find(name);
         Ok(())
     }
+
     pub async fn install(&self) -> Result<()> {
         let response = self.send_install_request(INSTALL_URL).await?;
         response.handle_install();
+        Ok(())
+    }
+
+    pub async fn register(&self) -> Result<()> {
+        let (email, password) = (read_email()?, read_password()?);
+        let response = self.send_register_request(REGISTER_URL, &email, &password).await?;
+        response.handle_register();
         Ok(())
     }
 
@@ -257,6 +308,7 @@ impl Project {
             }),
         }
     }
+
     async fn send_create_request(&self, url: &str) -> Result<Response> {
         let name = self.name.clone().unwrap_or("".to_string());
         check_zero_len(&name, "You must provide name to create a project.".into())?;
@@ -280,6 +332,7 @@ impl Project {
         println!("\nLooking for {} project", name);
         self.post_request(url, body).await
     }
+
     async fn send_install_request(&self, url: &str) -> Result<Response> {
         let base = self.version_split()?;
         let (name, version) = self.persist_hub(base.clone()).await?;
@@ -290,6 +343,15 @@ impl Project {
             "version": version,
         });
         println!("\nDeploying {} project with version {}", name, version);
+        self.post_request(url, body).await
+    }
+
+    async fn send_register_request(&self, url: &str, email: &str, password: &str) -> Result<Response> {
+        let body = json!({
+            "email": email,
+            "password": password,
+        });
+        println!("\nRegistration new user with email {}", email);
         self.post_request(url, body).await
     }
 
@@ -350,7 +412,10 @@ pub fn parse_response(r: String) -> Result<Response> {
             Ok(r) => Ok(Response::Found(r)),
             Err(_) => match serde_json::from_str(&r) {
                 Ok(r) => Ok(Response::Installed(r)),
-                Err(_) => Ok(parse_failure(&r)),
+                Err(_) => match serde_json::from_str(&r) {
+                    Ok(r) => Ok(Response::Registered(r)),
+                    Err(_) => Ok(parse_failure(&r)),
+                }
             },
         },
     }
@@ -399,6 +464,7 @@ fn check_zero_len(s: &str, reason: String) -> Result<()> {
         Ok(())
     }
 }
+
 fn check_version(s: String) -> Result<()> {
     check_zero_len(&s, "You must provide a project name.".into())?;
     if !s.contains("@") {
@@ -433,4 +499,36 @@ fn parse_toml(f: &str) -> Hub {
         Ok(hub) => hub,
         Err(_) => Hub::default(),
     }
+}
+
+fn read_email() -> Result<String> {
+    let mut stream = std::fs::OpenOptions::new().write(true).open("/dev/tty")?;
+    write!(stream, "Email: ")?;
+    stream.flush()?;
+    let mut email = String::new();
+    std::io::stdin().read_line(&mut email)?;
+    let email = email.trim();
+    if !&email.contains('@') {
+        let msg = "Email is invalid".to_string();
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+    }
+    Ok(email.to_string())
+}
+
+fn read_password() -> Result<String> {
+    let password = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
+    let confirm_password = rpassword::read_password_from_tty(Some("Confirm Password: ")).unwrap();
+    if password.len() < MIN_PASSWORD_LENGTH {
+        let msg = format!("Password shorter than {} characters", MIN_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+    }
+    if password.len() > MAX_PASSWORD_LENGTH  {
+        let msg = format!("Password longer than {} characters", MAX_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+    }
+    if password != confirm_password {
+        let msg = "Password does not equal Confirm password".to_string();
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into())
+    }
+    Ok(password)
 }

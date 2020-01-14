@@ -21,6 +21,7 @@ circle-rs = "0.2.0"
 termion="1.5.3"
 anyhow = "1.0"
 toml="0.5.5"
+rpassword = "4.0.3"
 
 [profile.dev]
 
