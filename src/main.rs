@@ -68,6 +68,7 @@ async fn main() -> Result<()> {
         Action::Find => project.find().await,
         Action::Install => project.install().await,
         Action::Register => project.register().await,
+        Action::Login => project.login().await,
         Action::InputError(f) => err(f),
     }
 }
