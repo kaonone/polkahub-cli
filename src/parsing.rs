@@ -96,47 +96,60 @@ pub struct Project {
     pub hub_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct Payload {
+#[derive(Debug, Deserialize)]
+pub struct CreatedPayload {
     pub repo_url: String,
     pub http_url: String,
     pub ws_url: String,
     pub repository_created: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct InstallPayload {
+#[derive(Debug, Deserialize)]
+pub struct InstalledPayload {
     pub http_url: String,
     pub ws_url: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Created {
-    pub status: String,
-    pub payload: Payload,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Found {
-    pub status: String,
-    pub payload: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Installed {
-    pub status: String,
-    pub payload: InstallPayload,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Registered {
-    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Failure {
     pub status: String,
     pub reason: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum CreatedResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: CreatedPayload },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum FoundResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: Vec<String> },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum InstalledResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: InstalledPayload },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum RegisteredResponse {
+    #[serde(rename = "ok")]
+    OkResult,
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -147,15 +160,6 @@ pub enum Action {
     Register,
     Help,
     InputError(Failure),
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum Response {
-    Created(Created),
-    Found(Found),
-    Installed(Installed),
-    Registered(Registered),
-    Fail(Failure),
 }
 
 impl FromStr for Action {
@@ -186,88 +190,83 @@ impl Default for Hub {
     }
 }
 
-impl Response {
-    /// Destructure and act upon the result
-    pub fn handle_create(&self) {
+impl CreatedResponse {
+    pub fn handle(&self) {
         match &self {
-            Response::Created(s) => {
-                let p = &s.payload;
-
+            CreatedResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", p.http_url);
+                println!(" -> {:?}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", p.ws_url);
+                println!(" -> {:?}", payload.ws_url);
                 print_italic("remote");
-                println!(" -> {:?}", p.repo_url);
+                println!(" -> {:?}", payload.repo_url);
             }
-            Response::Fail(e) => {
+            CreatedResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not create project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
+}
 
-    pub fn handle_install(&self) {
+impl InstalledResponse {
+    pub fn handle(&self) {
         match &self {
-            Response::Installed(s) => {
-                let p = &s.payload;
-
+            InstalledResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", p.http_url);
+                println!(" -> {:?}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", p.ws_url);
+                println!(" -> {:?}", payload.ws_url);
             }
-            Response::Fail(e) => {
+            InstalledResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not create project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
+}
 
-    pub fn handle_find(&self, name: &str) {
+impl FoundResponse {
+    pub fn handle(&self, name: &str) {
         match self {
-            Response::Found(s) => {
-                let p = &s.payload;
-
-                if p.is_empty() {
+            FoundResponse::OkResult { payload } => {
+                if payload.is_empty() {
                     print_green("Looks like no versions deployed yet!\n");
                     print!("");
                 } else {
-                    p.iter().for_each(|v| {
+                    payload.iter().for_each(|v| {
                         println!("{} {}", name, v);
                     })
                 }
             }
-            Response::Fail(e) => {
+            FoundResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not find project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
+}
 
-    pub fn handle_register(&self) {
+impl RegisteredResponse {
+    pub fn handle(&self) {
         match &self {
-            Response::Registered(_s) => {
+            RegisteredResponse::OkResult => {
                 print_green("done\n");
             }
-            Response::Fail(e) => {
+            RegisteredResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not register new user.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
 }
@@ -278,30 +277,26 @@ impl Project {
     }
 
     pub async fn create(&self) -> Result<()> {
-        let response = self.send_create_request(POLKAHUB_URL).await?;
-        response.handle_create();
+        self.send_create_request(POLKAHUB_URL).await?.handle();
         Ok(())
     }
 
     pub async fn find(&self) -> Result<()> {
-        let response = self.send_find_request(FIND_URL).await?;
         let name = if let Some(n) = &self.name { &n } else { "" };
-        response.handle_find(name);
+        self.send_find_request(FIND_URL).await?.handle(&name);
         Ok(())
     }
 
     pub async fn install(&self) -> Result<()> {
-        let response = self.send_install_request(INSTALL_URL).await?;
-        response.handle_install();
+        self.send_install_request(INSTALL_URL).await?.handle();
         Ok(())
     }
 
     pub async fn register(&self) -> Result<()> {
-        let (email, password) = (read_email()?, read_password()?);
-        let response = self
-            .send_register_request(REGISTER_URL, &email, &password)
-            .await?;
-        response.handle_register();
+        let (email, password) = (read_email()?, read_password_with_confirmation()?);
+        self.send_register_request(REGISTER_URL, &email, &password)
+            .await?
+            .handle();
         Ok(())
     }
 
@@ -316,7 +311,7 @@ impl Project {
         }
     }
 
-    async fn send_create_request(&self, url: &str) -> Result<Response> {
+    async fn send_create_request(&self, url: &str) -> Result<CreatedResponse> {
         let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide name to create a project.".into())?;
         let body = json!({
@@ -324,10 +319,11 @@ impl Project {
             "project_name": name,
         });
         println!("\nCreating {} project", name);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
-    async fn send_find_request(&self, url: &str) -> Result<Response> {
+    async fn send_find_request(&self, url: &str) -> Result<FoundResponse> {
         let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide a project name to look for.".into())?;
 
@@ -337,10 +333,11 @@ impl Project {
         });
 
         println!("\nLooking for {} project", name);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
-    async fn send_install_request(&self, url: &str) -> Result<Response> {
+    async fn send_install_request(&self, url: &str) -> Result<InstalledResponse> {
         let base = self.version_split()?;
         let (name, version) = self.persist_hub(base.clone()).await?;
         let body = json!({
@@ -350,7 +347,8 @@ impl Project {
             "version": version,
         });
         println!("\nDeploying {} project with version {}", name, version);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
     async fn send_register_request(
@@ -358,25 +356,26 @@ impl Project {
         url: &str,
         email: &str,
         password: &str,
-    ) -> Result<Response> {
+    ) -> Result<RegisteredResponse> {
         let body = json!({
             "email": email,
             "password": password,
         });
         println!("\nRegistration new user with email {}", email);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
-    async fn post_request(&self, url: &str, body: Value) -> Result<Response> {
+    async fn post_request(&self, url: &str, body: Value) -> Result<String> {
         let client = reqwest::Client::new();
         let mut loader = Infinite::new().to_stderr();
         loader.set_msg("");
 
         let _ = loader.start();
-        let result: Value = client.post(url).json(&body).send().await?.json().await?;
+        let result = client.post(url).json(&body).send().await?.text().await?;
         let _ = loader.stop();
 
-        parse_response(result.to_string())
+        Ok(result)
     }
 
     /// split project with version
@@ -414,32 +413,6 @@ impl Project {
             }
         };
         Ok((app_name, version))
-    }
-}
-
-pub fn parse_response(r: String) -> Result<Response> {
-    match serde_json::from_str(&r) {
-        Ok(r) => Ok(Response::Created(r)),
-        Err(_) => match serde_json::from_str(&r) {
-            Ok(r) => Ok(Response::Found(r)),
-            Err(_) => match serde_json::from_str(&r) {
-                Ok(r) => Ok(Response::Installed(r)),
-                Err(_) => match serde_json::from_str(&r) {
-                    Ok(r) => Ok(Response::Registered(r)),
-                    Err(_) => Ok(parse_failure(&r)),
-                },
-            },
-        },
-    }
-}
-
-pub fn parse_failure(r: &str) -> Response {
-    match serde_json::from_str(&r) {
-        Ok(r) => Response::Fail(Failure { ..r }),
-        Err(e) => Response::Fail(Failure {
-            status: "json parse error".to_owned(),
-            reason: e.to_string(),
-        }),
     }
 }
 
@@ -527,7 +500,7 @@ fn read_email() -> Result<String> {
     Ok(email.to_string())
 }
 
-fn read_password() -> Result<String> {
+fn read_password_with_confirmation() -> Result<String> {
     let password = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
     let confirm_password = rpassword::read_password_from_tty(Some("Confirm Password: ")).unwrap();
     if password.len() < MIN_PASSWORD_LENGTH {
