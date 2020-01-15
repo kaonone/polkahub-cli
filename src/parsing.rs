@@ -4,21 +4,24 @@ use reqwest;
 use rpassword;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{
-    io::{self, Write},
-    path::Path,
-    str::FromStr,
-    string::ToString,
-};
 use structopt::StructOpt;
 use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
 use toml;
 
+use std::{
+    env,
+    io::{self, Write},
+    path::{Path, PathBuf},
+    str::FromStr,
+    string::ToString,
+};
+
+pub const CREATE_URL: &str = "https://api-test.polkahub.org/api/v1/projects";
 pub const INSTALL_URL: &str = "https://api-test.polkahub.org/api/v1/install";
 pub const FIND_URL: &str = "https://api-test.polkahub.org/api/v1/find";
 pub const REGISTER_URL: &str = "https://api-test.polkahub.org/api/v1/signup";
-pub const POLKAHUB_URL: &str = "https://api-test.polkahub.org/api/v1/projects";
+pub const LOGIN_URL: &str = "https://api-test.polkahub.org/api/v1/login";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
 const MIN_PASSWORD_LENGTH: usize = 8;
 const MAX_PASSWORD_LENGTH: usize = 50;
@@ -72,6 +75,11 @@ struct Chainspec {
 struct Node {
     telemetry_url: String,
     listen_addr: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PolkahubConfig {
+    token: String,
 }
 
 ///
@@ -152,12 +160,22 @@ enum RegisteredResponse {
     ErrResult { reason: String },
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum LoginedResponse {
+    #[serde(rename = "ok")]
+    OkResult { token: String },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Action {
     Install,
     Create,
     Find,
     Register,
+    Login,
     Help,
     InputError(Failure),
 }
@@ -172,6 +190,7 @@ impl FromStr for Action {
             "help" => Ok(Action::Help),
             "install" => Ok(Action::Install),
             "register" => Ok(Action::Register),
+            "auth" => Ok(Action::Login),
             _ => Ok(Action::InputError(Failure {
                 status: "input error".to_owned(),
                 reason: format!("{} - is invalid action. {}", s, HELP_NOTION),
@@ -271,13 +290,35 @@ impl RegisteredResponse {
     }
 }
 
+impl LoginedResponse {
+    pub fn handle(&self) {
+        match &self {
+            LoginedResponse::OkResult { token } => match store_token(token) {
+                Ok(()) => print_green("done\n"),
+                Err(reason) => {
+                    let _ = err(Failure {
+                        status: "Could not login.\n".into(),
+                        reason: format!("Reason: {}", reason),
+                    });
+                }
+            },
+            LoginedResponse::ErrResult { reason } => {
+                let _ = err(Failure {
+                    status: "Could not login.\n".into(),
+                    reason: format!("Reason: {}", reason),
+                });
+            }
+        }
+    }
+}
+
 impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
 
     pub async fn create(&self) -> Result<()> {
-        self.send_create_request(POLKAHUB_URL).await?.handle();
+        self.send_create_request(CREATE_URL).await?.handle();
         Ok(())
     }
 
@@ -295,6 +336,14 @@ impl Project {
     pub async fn register(&self) -> Result<()> {
         let (email, password) = (read_email()?, read_password_with_confirmation()?);
         self.send_register_request(REGISTER_URL, &email, &password)
+            .await?
+            .handle();
+        Ok(())
+    }
+
+    pub async fn login(&self) -> Result<()> {
+        let (email, password) = (read_email()?, read_password()?);
+        self.send_login_request(LOGIN_URL, &email, &password)
             .await?
             .handle();
         Ok(())
@@ -366,6 +415,21 @@ impl Project {
         serde_json::from_str(&response).map_err(|e| e.into())
     }
 
+    async fn send_login_request(
+        &self,
+        url: &str,
+        email: &str,
+        password: &str,
+    ) -> Result<LoginedResponse> {
+        let body = json!({
+            "email": email,
+            "password": password,
+        });
+        println!("\nLogin user with email {}", email);
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
+    }
+
     async fn post_request(&self, url: &str, body: Value) -> Result<String> {
         let client = reqwest::Client::new();
         let mut loader = Infinite::new().to_stderr();
@@ -426,6 +490,10 @@ pub fn print_help() -> Result<()> {
     println!(" - find all versions of your project");
     print_blue("create ");
     println!(" - register new parachain and create endpoints");
+    print_blue("register ");
+    println!(" - create a new user in Polkahub");
+    print_blue("auth ");
+    println!(" - log in to Polkahub");
     Ok(())
 }
 
@@ -516,4 +584,38 @@ fn read_password_with_confirmation() -> Result<String> {
         return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
     }
     Ok(password)
+}
+
+fn read_password() -> Result<String> {
+    let password = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
+    if password.len() < MIN_PASSWORD_LENGTH {
+        let msg = format!("Password shorter than {} characters", MIN_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    if password.len() > MAX_PASSWORD_LENGTH {
+        let msg = format!("Password longer than {} characters", MAX_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    Ok(password)
+}
+
+fn store_token(token: &str) -> Result<()> {
+    let config = PolkahubConfig {
+        token: token.to_string(),
+    };
+    let data = toml::to_string(&config)?;
+    let path = polkahub_home_path();
+    std::fs::create_dir_all(&path)?;
+    let file_path = path.join("config");
+    let mut file = std::fs::File::create(&file_path)?;
+    file.write_all(data.as_bytes())?;
+    Ok(())
+}
+
+fn polkahub_home_path() -> PathBuf {
+    if let Ok(polkahub_home) = env::var("POLKAHUB_HOME") {
+        return Path::new(&polkahub_home).to_owned();
+    }
+    let home = env::var("HOME").expect("please set environment variable $HOME");
+    Path::new(&home).join(".polkahub")
 }
