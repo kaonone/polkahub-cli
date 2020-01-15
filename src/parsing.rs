@@ -1,9 +1,15 @@
 use anyhow::{anyhow, Result};
 use circle_rs::{Infinite, Progress};
 use reqwest;
+use rpassword;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{io, path::Path, str::FromStr, string::ToString};
+use std::{
+    io::{self, Write},
+    path::Path,
+    str::FromStr,
+    string::ToString,
+};
 use structopt::StructOpt;
 use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -11,24 +17,31 @@ use toml;
 
 pub const INSTALL_URL: &str = "https://api-test.polkahub.org/api/v1/install";
 pub const FIND_URL: &str = "https://api-test.polkahub.org/api/v1/find";
+pub const REGISTER_URL: &str = "https://api-test.polkahub.org/api/v1/signup";
 pub const POLKAHUB_URL: &str = "https://api-test.polkahub.org/api/v1/projects";
 pub const HELP_NOTION: &str = "Try running `polkahub help` to see all available options";
+const MIN_PASSWORD_LENGTH: usize = 8;
+const MAX_PASSWORD_LENGTH: usize = 50;
 
 pub fn print_green(s: &str) {
     let green = color::Fg(color::LightGreen);
     print!("{}{}{}", green, s, color::Fg(color::Reset))
 }
+
 pub fn print_red(s: &str) {
     print!("{}{}{}", color::Fg(color::Red), s, color::Fg(color::Reset))
 }
+
 pub fn print_yellow(s: &str) {
     let yellow = color::Fg(color::LightYellow);
     print!("{}{}{}", yellow, s, color::Fg(color::Reset))
 }
+
 pub fn print_blue(s: &str) {
     let blue = color::Fg(color::LightBlue);
     print!("{}{}{}", blue, s, color::Fg(color::Reset))
 }
+
 pub fn print_italic(s: &str) {
     print!("{}{}{}", style::Italic, s, style::Reset);
 }
@@ -40,6 +53,7 @@ pub struct Hub {
     chainspec: Option<Chainspec>,
     node: Option<Node>,
 }
+
 ///Parachain meta info
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Parachain {
@@ -47,11 +61,13 @@ struct Parachain {
     description: String,
     version: String,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Chainspec {
     version: String,
     path: String,
 }
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Node {
     telemetry_url: String,
@@ -80,38 +96,60 @@ pub struct Project {
     pub hub_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct Payload {
+#[derive(Debug, Deserialize)]
+pub struct CreatedPayload {
     pub repo_url: String,
     pub http_url: String,
     pub ws_url: String,
     pub repository_created: bool,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct InstallPayload {
+
+#[derive(Debug, Deserialize)]
+pub struct InstalledPayload {
     pub http_url: String,
     pub ws_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Created {
-    pub status: String,
-    pub payload: Payload,
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Found {
-    pub status: String,
-    pub payload: Vec<String>,
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
-pub struct Installed {
-    pub status: String,
-    pub payload: InstallPayload,
-}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Failure {
     pub status: String,
     pub reason: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum CreatedResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: CreatedPayload },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum FoundResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: Vec<String> },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum InstalledResponse {
+    #[serde(rename = "ok")]
+    OkResult { payload: InstalledPayload },
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status")]
+enum RegisteredResponse {
+    #[serde(rename = "ok")]
+    OkResult,
+    #[serde(rename = "error")]
+    ErrResult { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -119,15 +157,9 @@ pub enum Action {
     Install,
     Create,
     Find,
+    Register,
     Help,
     InputError(Failure),
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum Response {
-    Created(Created),
-    Found(Found),
-    Installed(Installed),
-    Fail(Failure),
 }
 
 impl FromStr for Action {
@@ -139,6 +171,7 @@ impl FromStr for Action {
             "find" => Ok(Action::Find),
             "help" => Ok(Action::Help),
             "install" => Ok(Action::Install),
+            "register" => Ok(Action::Register),
             _ => Ok(Action::InputError(Failure {
                 status: "input error".to_owned(),
                 reason: format!("{} - is invalid action. {}", s, HELP_NOTION),
@@ -157,71 +190,83 @@ impl Default for Hub {
     }
 }
 
-impl Response {
-    /// Destructure and act upon the result
-    pub fn handle_create(&self) {
+impl CreatedResponse {
+    pub fn handle(&self) {
         match &self {
-            Response::Created(s) => {
-                let p = &s.payload;
-
+            CreatedResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", p.http_url);
+                println!(" -> {:?}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", p.ws_url);
+                println!(" -> {:?}", payload.ws_url);
                 print_italic("remote");
-                println!(" -> {:?}", p.repo_url);
+                println!(" -> {:?}", payload.repo_url);
             }
-            Response::Fail(e) => {
+            CreatedResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not create project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
-    pub fn handle_install(&self) {
-        match &self {
-            Response::Installed(s) => {
-                let p = &s.payload;
+}
 
+impl InstalledResponse {
+    pub fn handle(&self) {
+        match &self {
+            InstalledResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", p.http_url);
+                println!(" -> {:?}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", p.ws_url);
+                println!(" -> {:?}", payload.ws_url);
             }
-            Response::Fail(e) => {
+            InstalledResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not create project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
         }
     }
-    pub fn handle_find(&self, name: &str) {
-        match self {
-            Response::Found(s) => {
-                let p = &s.payload;
+}
 
-                if p.len() == 0 {
+impl FoundResponse {
+    pub fn handle(&self, name: &str) {
+        match self {
+            FoundResponse::OkResult { payload } => {
+                if payload.is_empty() {
                     print_green("Looks like no versions deployed yet!\n");
                     print!("");
                 } else {
-                    p.iter().for_each(|v| {
+                    payload.iter().for_each(|v| {
                         println!("{} {}", name, v);
                     })
                 }
             }
-            Response::Fail(e) => {
+            FoundResponse::ErrResult { reason } => {
                 let _ = err(Failure {
                     status: "Could not find project.\n".into(),
-                    reason: format!("Reason: {}", e.reason),
+                    reason: format!("Reason: {}", reason),
                 });
             }
-            _ => unreachable!(),
+        }
+    }
+}
+
+impl RegisteredResponse {
+    pub fn handle(&self) {
+        match &self {
+            RegisteredResponse::OkResult => {
+                print_green("done\n");
+            }
+            RegisteredResponse::ErrResult { reason } => {
+                let _ = err(Failure {
+                    status: "Could not register new user.\n".into(),
+                    reason: format!("Reason: {}", reason),
+                });
+            }
         }
     }
 }
@@ -230,20 +275,28 @@ impl Project {
     pub fn new() -> Project {
         Project::from_args()
     }
+
     pub async fn create(&self) -> Result<()> {
-        let response = self.send_create_request(POLKAHUB_URL).await?;
-        response.handle_create();
+        self.send_create_request(POLKAHUB_URL).await?.handle();
         Ok(())
     }
+
     pub async fn find(&self) -> Result<()> {
-        let response = self.send_find_request(FIND_URL).await?;
         let name = if let Some(n) = &self.name { &n } else { "" };
-        response.handle_find(name);
+        self.send_find_request(FIND_URL).await?.handle(&name);
         Ok(())
     }
+
     pub async fn install(&self) -> Result<()> {
-        let response = self.send_install_request(INSTALL_URL).await?;
-        response.handle_install();
+        self.send_install_request(INSTALL_URL).await?.handle();
+        Ok(())
+    }
+
+    pub async fn register(&self) -> Result<()> {
+        let (email, password) = (read_email()?, read_password_with_confirmation()?);
+        self.send_register_request(REGISTER_URL, &email, &password)
+            .await?
+            .handle();
         Ok(())
     }
 
@@ -257,19 +310,21 @@ impl Project {
             }),
         }
     }
-    async fn send_create_request(&self, url: &str) -> Result<Response> {
-        let name = self.name.clone().unwrap_or("".to_string());
+
+    async fn send_create_request(&self, url: &str) -> Result<CreatedResponse> {
+        let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide name to create a project.".into())?;
         let body = json!({
             "account_id": 1,
             "project_name": name,
         });
         println!("\nCreating {} project", name);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
-    async fn send_find_request(&self, url: &str) -> Result<Response> {
-        let name = self.name.clone().unwrap_or("".to_string());
+    async fn send_find_request(&self, url: &str) -> Result<FoundResponse> {
+        let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide a project name to look for.".into())?;
 
         let body = json!({
@@ -278,9 +333,11 @@ impl Project {
         });
 
         println!("\nLooking for {} project", name);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
-    async fn send_install_request(&self, url: &str) -> Result<Response> {
+
+    async fn send_install_request(&self, url: &str) -> Result<InstalledResponse> {
         let base = self.version_split()?;
         let (name, version) = self.persist_hub(base.clone()).await?;
         let body = json!({
@@ -290,28 +347,44 @@ impl Project {
             "version": version,
         });
         println!("\nDeploying {} project with version {}", name, version);
-        self.post_request(url, body).await
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
     }
 
-    async fn post_request(&self, url: &str, body: Value) -> Result<Response> {
+    async fn send_register_request(
+        &self,
+        url: &str,
+        email: &str,
+        password: &str,
+    ) -> Result<RegisteredResponse> {
+        let body = json!({
+            "email": email,
+            "password": password,
+        });
+        println!("\nRegistration new user with email {}", email);
+        let response = self.post_request(url, body).await?;
+        serde_json::from_str(&response).map_err(|e| e.into())
+    }
+
+    async fn post_request(&self, url: &str, body: Value) -> Result<String> {
         let client = reqwest::Client::new();
         let mut loader = Infinite::new().to_stderr();
         loader.set_msg("");
 
         let _ = loader.start();
-        let result: Value = client.post(url).json(&body).send().await?.json().await?;
+        let result = client.post(url).json(&body).send().await?.text().await?;
         let _ = loader.stop();
 
-        parse_response(result.to_string())
+        Ok(result)
     }
 
     /// split project with version
     fn version_split(&self) -> Result<(String, String)> {
-        let s = self.name.clone().unwrap_or("".to_string());
+        let s = self.name.clone().unwrap_or_else(|| "".to_string());
         check_version(s.clone())?;
 
-        let project_name = s.split("@").nth(0).unwrap_or(&s).to_string();
-        let v = s.split("@").nth(1).unwrap_or("").to_string();
+        let project_name = s.split('@').nth(0).unwrap_or(&s).to_string();
+        let v = s.split('@').nth(1).unwrap_or("").to_string();
 
         Ok((project_name, v))
     }
@@ -321,7 +394,7 @@ impl Project {
         let hub_file = self.hub_file.clone().unwrap_or_else(|| {
             // print warning if you provide an alias but have name in Hub.toml
             // (priority concerns)
-            if let None = self.alias.clone() {
+            if self.alias.is_none() {
                 print_yellow("WARN: ");
                 print_italic("No Hub.toml path provided, looking in root directory\n");
             }
@@ -329,7 +402,7 @@ impl Project {
         });
         let hub = read_hubfile(hub_file).await?;
         // if hub exist take values from there
-        let (app_name, version) = if let Some(p) = hub.parachain.clone() {
+        let (app_name, version) = if let Some(p) = hub.parachain {
             (p.name, p.version)
         } else {
             // or take either alias or project name if none provided
@@ -340,29 +413,6 @@ impl Project {
             }
         };
         Ok((app_name, version))
-    }
-}
-
-pub fn parse_response(r: String) -> Result<Response> {
-    match serde_json::from_str(&r) {
-        Ok(r) => Ok(Response::Created(r)),
-        Err(_) => match serde_json::from_str(&r) {
-            Ok(r) => Ok(Response::Found(r)),
-            Err(_) => match serde_json::from_str(&r) {
-                Ok(r) => Ok(Response::Installed(r)),
-                Err(_) => Ok(parse_failure(&r)),
-            },
-        },
-    }
-}
-
-pub fn parse_failure(r: &str) -> Response {
-    match serde_json::from_str(&r) {
-        Ok(r) => Response::Fail(Failure { ..r }),
-        Err(e) => Response::Fail(Failure {
-            status: "json parse error".to_owned(),
-            reason: e.to_string(),
-        }),
     }
 }
 
@@ -389,7 +439,7 @@ pub fn err(e: Failure) -> Result<()> {
 }
 
 fn check_zero_len(s: &str, reason: String) -> Result<()> {
-    if s.len() == 0 {
+    if s.is_empty() {
         let f = Failure {
             status: "Input error".to_owned(),
             reason,
@@ -399,9 +449,10 @@ fn check_zero_len(s: &str, reason: String) -> Result<()> {
         Ok(())
     }
 }
+
 fn check_version(s: String) -> Result<()> {
     check_zero_len(&s, "You must provide a project name.".into())?;
-    if !s.contains("@") {
+    if !s.contains('@') {
         let f = Failure {
             status: "Input error".to_owned(),
             reason: "You must provide specific version to install: <project_name>@<version>"
@@ -417,9 +468,9 @@ pub(crate) async fn read_hubfile(path: String) -> Result<Hub> {
     let trimmed = path.split("Hub.toml").nth(0).unwrap_or_else(|| &path);
     let file_path = Path::new(&trimmed).join("Hub.toml");
     let mut hub_file = vec![];
-    let mut file = match File::open(file_path).await{
+    let mut file = match File::open(file_path).await {
         Ok(f) => f,
-        Err(_) => return Ok(Hub::default())
+        Err(_) => return Ok(Hub::default()),
     };
     file.read_to_end(&mut hub_file).await?;
     match String::from_utf8(hub_file) {
@@ -433,4 +484,36 @@ fn parse_toml(f: &str) -> Hub {
         Ok(hub) => hub,
         Err(_) => Hub::default(),
     }
+}
+
+fn read_email() -> Result<String> {
+    let mut stream = std::fs::OpenOptions::new().write(true).open("/dev/tty")?;
+    write!(stream, "Email: ")?;
+    stream.flush()?;
+    let mut email = String::new();
+    std::io::stdin().read_line(&mut email)?;
+    let email = email.trim();
+    if !&email.contains('@') {
+        let msg = "Email is invalid".to_string();
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    Ok(email.to_string())
+}
+
+fn read_password_with_confirmation() -> Result<String> {
+    let password = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
+    let confirm_password = rpassword::read_password_from_tty(Some("Confirm Password: ")).unwrap();
+    if password.len() < MIN_PASSWORD_LENGTH {
+        let msg = format!("Password shorter than {} characters", MIN_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    if password.len() > MAX_PASSWORD_LENGTH {
+        let msg = format!("Password longer than {} characters", MAX_PASSWORD_LENGTH);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    if password != confirm_password {
+        let msg = "Password does not equal Confirm password".to_string();
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg).into());
+    }
+    Ok(password)
 }
