@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use circle_rs::{Infinite, Progress};
-use reqwest;
+use reqwest::{self, header};
 use rpassword;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,7 +11,7 @@ use toml;
 
 use std::{
     env,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
     string::ToString,
@@ -77,7 +77,7 @@ struct Node {
     listen_addr: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PolkahubConfig {
     token: String,
 }
@@ -364,11 +364,10 @@ impl Project {
         let name = self.name.clone().unwrap_or_else(|| "".to_string());
         check_zero_len(&name, "You must provide name to create a project.".into())?;
         let body = json!({
-            "account_id": 1,
             "project_name": name,
         });
         println!("\nCreating {} project", name);
-        let response = self.post_request(url, body).await?;
+        let response = self.post_request_with_token(url, body).await?;
         serde_json::from_str(&response).map_err(|e| e.into())
     }
 
@@ -377,12 +376,11 @@ impl Project {
         check_zero_len(&name, "You must provide a project name to look for.".into())?;
 
         let body = json!({
-            "account_id": 1,
             "project_name": name,
         });
 
         println!("\nLooking for {} project", name);
-        let response = self.post_request(url, body).await?;
+        let response = self.post_request_with_token(url, body).await?;
         serde_json::from_str(&response).map_err(|e| e.into())
     }
 
@@ -390,13 +388,12 @@ impl Project {
         let base = self.version_split()?;
         let (name, version) = self.persist_hub(base.clone()).await?;
         let body = json!({
-            "account_id": 1,
             "app_name": name,
             "project_name": base.0,
             "version": version,
         });
         println!("\nDeploying {} project with version {}", name, version);
-        let response = self.post_request(url, body).await?;
+        let response = self.post_request_with_token(url, body).await?;
         serde_json::from_str(&response).map_err(|e| e.into())
     }
 
@@ -432,6 +429,35 @@ impl Project {
 
     async fn post_request(&self, url: &str, body: Value) -> Result<String> {
         let client = reqwest::Client::new();
+        let mut loader = Infinite::new().to_stderr();
+        loader.set_msg("");
+
+        let _ = loader.start();
+        let result = client.post(url).json(&body).send().await?.text().await?;
+        let _ = loader.stop();
+
+        Ok(result)
+    }
+
+    async fn post_request_with_token(&self, url: &str, body: Value) -> Result<String> {
+        let token = read_token().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("{:?}. Invalid token, please registered and auth first.", e),
+            )
+        })?;
+        let mut headers = header::HeaderMap::new();
+        let auth_data =
+            header::HeaderValue::from_str(&format!("Bearer {}", token)).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("{:?}. Invalid token, please registered and auth first.", e),
+                )
+            })?;
+        headers.insert(header::AUTHORIZATION, auth_data);
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()?;
         let mut loader = Infinite::new().to_stderr();
         loader.set_msg("");
 
@@ -610,6 +636,14 @@ fn store_token(token: &str) -> Result<()> {
     let mut file = std::fs::File::create(&file_path)?;
     file.write_all(data.as_bytes())?;
     Ok(())
+}
+
+fn read_token() -> Result<String> {
+    let file_path = polkahub_home_path().join("config");
+    let mut file = std::fs::File::open(&file_path)?;
+    let mut data = String::new();
+    file.read_to_string(&mut data)?;
+    Ok(toml::from_str::<PolkahubConfig>(&data)?.token)
 }
 
 fn polkahub_home_path() -> PathBuf {
