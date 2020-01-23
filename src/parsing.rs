@@ -137,9 +137,17 @@ enum CreatedResponse {
 #[serde(tag = "status")]
 enum FoundResponse {
     #[serde(rename = "ok")]
-    OkResult { payload: Vec<String> },
+    OkResult { payload: Vec<FoundProject> },
     #[serde(rename = "error")]
     ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+struct FoundProject {
+    login: String,
+    name: String,
+    version: String,
+    description: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -252,15 +260,21 @@ impl InstalledResponse {
 }
 
 impl FoundResponse {
-    pub fn handle(&self, name: &str) {
+    pub fn handle(&self) {
         match self {
             FoundResponse::OkResult { payload } => {
                 if payload.is_empty() {
                     print_green("Looks like no versions deployed yet!\n");
                     print!("");
                 } else {
-                    payload.iter().for_each(|v| {
-                        println!("{} {}", name, v);
+                    payload.iter().for_each(|p| {
+                        println!(
+                            "{}/{}@{} {}",
+                            p.login,
+                            p.name,
+                            p.version,
+                            p.description.as_ref().unwrap_or(&"".to_string())
+                        );
                     })
                 }
             }
@@ -323,8 +337,7 @@ impl Project {
     }
 
     pub async fn find(&self) -> Result<()> {
-        let name = if let Some(n) = &self.name { &n } else { "" };
-        self.send_find_request(FIND_URL).await?.handle(&name);
+        self.send_find_request(FIND_URL).await?.handle();
         Ok(())
     }
 
@@ -376,7 +389,7 @@ impl Project {
         check_zero_len(&name, "You must provide a project name to look for.".into())?;
 
         let body = json!({
-            "project_name": name,
+            "name": name,
         });
 
         println!("\nLooking for {} project", name);
