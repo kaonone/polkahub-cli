@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
 use circle_rs::{Infinite, Progress};
+use lazy_static;
+use regex::Regex;
 use reqwest::{self, header};
 use rpassword;
 use serde_derive::{Deserialize, Serialize};
@@ -8,6 +10,10 @@ use structopt::StructOpt;
 use termion::{color, style};
 use tokio::{fs::File, io::AsyncReadExt};
 use toml;
+
+lazy_static::lazy_static! {
+    static ref PROJECT_FULL_NAME: Regex = Regex::new(r"^(?P<login>[\w\d-]+)/(?P<name>[\w\d-]+)@(?P<version>[\w\d]+)$").unwrap_or_else(|_| panic!("invalid pattern"));
+}
 
 use std::{
     env,
@@ -80,6 +86,13 @@ struct Node {
 #[derive(Debug, Serialize, Deserialize)]
 struct PolkahubConfig {
     token: String,
+}
+
+#[derive(Debug)]
+struct ProjectMetadata {
+    login: String,
+    name: String,
+    version: String,
 }
 
 ///
@@ -230,7 +243,7 @@ impl CreatedResponse {
                 println!(" -> {:?}", payload.repo_url);
             }
             CreatedResponse::ErrResult { reason } => {
-                let _ = err(Failure {
+                let _ = err::<()>(Failure {
                     status: "Could not create project.\n".into(),
                     reason: format!("Reason: {}", reason),
                 });
@@ -250,7 +263,7 @@ impl InstalledResponse {
                 println!(" -> {:?}", payload.ws_url);
             }
             InstalledResponse::ErrResult { reason } => {
-                let _ = err(Failure {
+                let _ = err::<()>(Failure {
                     status: "Could not create project.\n".into(),
                     reason: format!("Reason: {}", reason),
                 });
@@ -269,7 +282,7 @@ impl FoundResponse {
                 } else {
                     payload.iter().for_each(|p| {
                         println!(
-                            "{}/{}@{} {}",
+                            "{}/{}@{}\t{}",
                             p.login,
                             p.name,
                             p.version,
@@ -279,7 +292,7 @@ impl FoundResponse {
                 }
             }
             FoundResponse::ErrResult { reason } => {
-                let _ = err(Failure {
+                let _ = err::<()>(Failure {
                     status: "Could not find project.\n".into(),
                     reason: format!("Reason: {}", reason),
                 });
@@ -295,7 +308,7 @@ impl RegisteredResponse {
                 print_green("done\n");
             }
             RegisteredResponse::ErrResult { reason } => {
-                let _ = err(Failure {
+                let _ = err::<()>(Failure {
                     status: "Could not register new user.\n".into(),
                     reason: format!("Reason: {}", reason),
                 });
@@ -310,14 +323,14 @@ impl LoginedResponse {
             LoginedResponse::OkResult { token } => match store_token(token) {
                 Ok(()) => print_green("done\n"),
                 Err(reason) => {
-                    let _ = err(Failure {
+                    let _ = err::<()>(Failure {
                         status: "Could not login.\n".into(),
                         reason: format!("Reason: {}", reason),
                     });
                 }
             },
             LoginedResponse::ErrResult { reason } => {
-                let _ = err(Failure {
+                let _ = err::<()>(Failure {
                     status: "Could not login.\n".into(),
                     reason: format!("Reason: {}", reason),
                 });
@@ -398,12 +411,14 @@ impl Project {
     }
 
     async fn send_install_request(&self, url: &str) -> Result<InstalledResponse> {
-        let base = self.version_split()?;
-        let (name, version) = self.persist_hub(base.clone()).await?;
+        let project_metadata = self.parse_full_name_project()?;
+        let (name, version) = self.persist_hub(&project_metadata).await?;
+
         let body = json!({
             "app_name": name,
-            "project_name": base.0,
-            "version": version,
+            "login": project_metadata.login,
+            "project_name": project_metadata.name,
+            "version": project_metadata.version,
         });
         println!("\nDeploying {} project with version {}", name, version);
         let response = self.post_request_with_token(url, body).await?;
@@ -481,19 +496,39 @@ impl Project {
         Ok(result)
     }
 
-    /// split project with version
-    fn version_split(&self) -> Result<(String, String)> {
+    fn parse_full_name_project(&self) -> Result<ProjectMetadata, anyhow::Error> {
         let s = self.name.clone().unwrap_or_else(|| "".to_string());
-        check_version(s.clone())?;
-
-        let project_name = s.split('@').nth(0).unwrap_or(&s).to_string();
-        let v = s.split('@').nth(1).unwrap_or("").to_string();
-
-        Ok((project_name, v))
+        let f = Failure {
+            status: "Input error".to_owned(),
+            reason:
+                "You must provide specific version to install: <login>/<project_name>@<version>"
+                    .to_string(),
+        };
+        if let Some(captures) = PROJECT_FULL_NAME.captures(&s) {
+            let login = match captures.name("login") {
+                Some(l) => l.as_str().to_string(),
+                None => return failure_to_anyhow::<ProjectMetadata>(f),
+            };
+            let name = match captures.name("name") {
+                Some(n) => n.as_str().to_string(),
+                None => return failure_to_anyhow::<ProjectMetadata>(f),
+            };
+            let version = match captures.name("version") {
+                Some(v) => v.as_str().to_string(),
+                None => return failure_to_anyhow::<ProjectMetadata>(f),
+            };
+            Ok(ProjectMetadata {
+                login,
+                name,
+                version,
+            })
+        } else {
+            failure_to_anyhow::<ProjectMetadata>(f)
+        }
     }
 
     /// if Hub.toml is present, use its data over flags
-    async fn persist_hub(&self, project: (String, String)) -> Result<(String, String)> {
+    async fn persist_hub(&self, project_metadata: &ProjectMetadata) -> Result<(String, String)> {
         let hub_file = self.hub_file.clone().unwrap_or_else(|| {
             // print warning if you provide an alias but have name in Hub.toml
             // (priority concerns)
@@ -510,9 +545,12 @@ impl Project {
         } else {
             // or take either alias or project name if none provided
             if let Some(alias) = self.alias.clone() {
-                (alias, project.1)
+                (alias, project_metadata.version.to_string())
             } else {
-                project
+                (
+                    project_metadata.name.to_string(),
+                    project_metadata.version.to_string(),
+                )
             }
         };
         Ok((app_name, version))
@@ -536,12 +574,16 @@ pub fn print_help() -> Result<()> {
     Ok(())
 }
 
-pub fn err(e: Failure) -> Result<()> {
+pub fn err<O>(e: Failure) -> Result<O> {
     let frame: String = e.status.chars().map(|_| '—').collect();
     println!(" {}", frame);
     print_red(&format!(" {}", e.status));
     println!(" {}", frame);
     println!("{}", e.reason);
+    failure_to_anyhow(e)
+}
+
+fn failure_to_anyhow<O>(e: Failure) -> Result<O> {
     Err(anyhow!("{}", e.reason))
 }
 
@@ -551,21 +593,7 @@ fn check_zero_len(s: &str, reason: String) -> Result<()> {
             status: "Input error".to_owned(),
             reason,
         };
-        err(f)
-    } else {
-        Ok(())
-    }
-}
-
-fn check_version(s: String) -> Result<()> {
-    check_zero_len(&s, "You must provide a project name.".into())?;
-    if !s.contains('@') {
-        let f = Failure {
-            status: "Input error".to_owned(),
-            reason: "You must provide specific version to install: <project_name>@<version>"
-                .to_owned(),
-        };
-        err(f)
+        err::<()>(f)
     } else {
         Ok(())
     }
