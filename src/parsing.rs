@@ -14,7 +14,7 @@ use toml;
 lazy_static::lazy_static! {
     static ref PROJECT_FULL_NAME: Regex = Regex::new(r"^(?P<login>[\w\d-]+)/(?P<name>[a-z0-9-]+)@(?P<version>[\w\d]+)$")
         .unwrap_or_else(|_| panic!("invalid PROJECT_FULL_NAME pattern"));
-    static ref PROJECT_NAME: Regex = Regex::new(r"[a-z0-9-]+").unwrap_or_else(|_| panic!("invalid PROJECT_NAME pattern"));
+    static ref PROJECT_NAME: Regex = Regex::new(r"^[a-z0-9-]+$").unwrap_or_else(|_| panic!("invalid PROJECT_NAME pattern"));
 }
 
 use std::{
@@ -609,7 +609,7 @@ fn check_project_name(project_name: &str) -> Result<()> {
     } else {
         let f = Failure {
             status: "Input error".to_string(),
-            reason: "Project name must consists from 'a'-'z' '0'-'9', '-'.".to_string(),
+            reason: "Project name must consist only from 'a'-'z' '0'-'9', '-'.".to_string(),
         };
         failure_to_anyhow::<()>(f)
     }
