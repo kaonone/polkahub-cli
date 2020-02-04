@@ -12,7 +12,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 use toml;
 
 lazy_static::lazy_static! {
-    static ref PROJECT_FULL_NAME: Regex = Regex::new(r"^(?P<login>[\w\d-]+)/(?P<name>[a-z0-9-]+)@(?P<version>[\w\d]+)$")
+    static ref PROJECT_FULL_NAME: Regex = Regex::new(r"^(?P<login>[\w\d-]+)/(?P<name>[a-z0-9-]+)@(?P<version>[\w\d.-]+)$")
         .unwrap_or_else(|_| panic!("invalid PROJECT_FULL_NAME pattern"));
     static ref PROJECT_NAME: Regex = Regex::new(r"^[a-z0-9-]+$").unwrap_or_else(|_| panic!("invalid PROJECT_NAME pattern"));
 }
