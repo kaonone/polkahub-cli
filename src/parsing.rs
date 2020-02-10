@@ -581,7 +581,7 @@ pub fn print_help() -> Result<()> {
 pub fn err<O>(e: Failure) -> Result<O> {
     let frame: String = e.status.chars().map(|_| '—').collect();
     println!(" {}", frame);
-    print_red(&format!(" {}", e.status));
+    print_red(&format!(" {}\n", e.status));
     println!(" {}", frame);
     println!("{}", e.reason);
     failure_to_anyhow(e)
