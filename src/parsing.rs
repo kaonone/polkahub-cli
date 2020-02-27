@@ -187,9 +187,14 @@ enum RegisteredResponse {
 #[serde(tag = "status")]
 enum LoginedResponse {
     #[serde(rename = "ok")]
-    OkResult { token: String },
+    OkResult { payload: LoginedResponsePayload },
     #[serde(rename = "error")]
     ErrResult { reason: String },
+}
+
+#[derive(Deserialize, Debug)]
+struct LoginedResponsePayload {
+    token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -238,11 +243,11 @@ impl CreatedResponse {
             CreatedResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", payload.http_url);
+                println!(" -> {}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", payload.ws_url);
+                println!(" -> {}", payload.ws_url);
                 print_italic("remote");
-                println!(" -> {:?}", payload.repo_url);
+                println!(" -> {}", payload.repo_url);
             }
             CreatedResponse::ErrResult { reason } => {
                 let _ = err::<()>(Failure {
@@ -260,9 +265,9 @@ impl InstalledResponse {
             InstalledResponse::OkResult { payload } => {
                 print_green("done\n");
                 print_blue("https ");
-                println!(" -> {:?}", payload.http_url);
+                println!(" -> {}", payload.http_url);
                 print_blue("ws    ");
-                println!(" -> {:?}", payload.ws_url);
+                println!(" -> {}", payload.ws_url);
             }
             InstalledResponse::ErrResult { reason } => {
                 let _ = err::<()>(Failure {
@@ -322,7 +327,9 @@ impl RegisteredResponse {
 impl LoginedResponse {
     pub fn handle(&self) {
         match &self {
-            LoginedResponse::OkResult { token } => match store_token(token) {
+            LoginedResponse::OkResult {
+                payload: LoginedResponsePayload { token },
+            } => match store_token(token) {
                 Ok(()) => print_green("done\n"),
                 Err(reason) => {
                     let _ = err::<()>(Failure {
@@ -581,7 +588,7 @@ pub fn print_help() -> Result<()> {
 pub fn err<O>(e: Failure) -> Result<O> {
     let frame: String = e.status.chars().map(|_| '—').collect();
     println!(" {}", frame);
-    print_red(&format!(" {}", e.status));
+    print_red(&format!(" {}\n", e.status));
     println!(" {}", frame);
     println!("{}", e.reason);
     failure_to_anyhow(e)
