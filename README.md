@@ -12,7 +12,7 @@ Windows: docker utility installed
 ### **Windows**
 On Windows machine you better use it through pre-compiled docker image like this:
 ```bash
-docker run --rm -u`id -u`:`id -g` -ti -v $HOME/.polkahub:/tmp/home -e POLKAHUB_HOME=/tmp/home registry.polkahub.org/polkahub-cli:v2 <action> [ARGS]
+docker run --rm -ti -v $HOME/.polkahub:/tmp/home -e POLKAHUB_HOME=/tmp/home registry.polkahub.org/polkahub-cli:v3 <action> [ARGS]
 ```
 
 ### **MacOS / Linux**
